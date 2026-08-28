@@ -1,2 +1,12 @@
-.venv/
+/**/.venv/
 .env
+/**/__pycache__/
+/**/node_modules
+/**/package-lock.json
+/dataset
+/dataset_raw
+/dataset_arcface
+/training/snapshots_cache
+runs/
+volumes_backup/
+snapshots/

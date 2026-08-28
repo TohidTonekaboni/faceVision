@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-facevision}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-facevision}
+      POSTGRES_DB: ${POSTGRES_DB:-facevision}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-facevision}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-facevision}:${POSTGRES_PASSWORD:-facevision}@db:5432/${POSTGRES_DB:-facevision}
+      JWT_SECRET: ${JWT_SECRET:-insecure-dev-secret-change-me}
+      CAMERA_SECRET_KEY: ${CAMERA_SECRET_KEY:-insecure-camera-secret-change-me}
+      SNAPSHOT_DIR: /app/storage/snapshots
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    volumes:
+      - snapshots:/app/storage/snapshots
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  db_data:
+  snapshots:
