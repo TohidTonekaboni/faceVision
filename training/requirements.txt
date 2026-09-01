@@ -1,7 +1,0 @@
-# Combined dependencies for running the full pipeline (export + build +
-# train) on one machine, e.g. local development. For a GPU-server transfer,
-# install requirements-train.txt there instead — it excludes the
-# database/dotenv dependencies that requirements-export.txt needs and that
-# aren't available/needed off the machine with DB access.
--r requirements-export.txt
--r requirements-train.txt
