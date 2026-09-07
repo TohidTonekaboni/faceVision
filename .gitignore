@@ -10,3 +10,4 @@
 runs/
 volumes_backup/
 snapshots/
+/pipeline/arcface_images/
