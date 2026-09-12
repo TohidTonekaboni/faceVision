@@ -21,8 +21,13 @@ class Settings(BaseSettings):
 
     snapshot_dir: str = "/app/storage/snapshots"
 
-    inference_model_path: str = "/app/inference/best.pt"
-    inference_confidence_threshold: float = 0.4
+    # RetinaFace (det_10g) + ArcFace (w600k_r50) from the InsightFace
+    # "buffalo_l" model pack, downloaded/cached on first use.
+    face_model_pack: str = "buffalo_l"
+    face_ctx_id: int = -1  # -1 for CPU, >=0 for GPU device id
+    face_det_thresh: float = 0.5
+    face_identify_threshold: float = 0.35
+    face_gallery_path: str = "/app/inference/gallery.npz"
 
     # Caps how many distinct cameras can have an active RTSP capture open at
     # once (not viewers — viewers of the same camera share one capture).
