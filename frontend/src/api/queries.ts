@@ -182,6 +182,16 @@ export function useRunInference() {
   });
 }
 
+export function useRunOfflineInference() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return (await apiClient.post<InferenceResult>("/api/inference/image", formData)).data;
+    },
+  });
+}
+
 /**
  * Mints a short-lived, single-camera inference-stream token (admin-only,
  * separate resource scope from the plain camera stream token) and points

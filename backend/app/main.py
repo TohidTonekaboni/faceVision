@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.logger import configure_logging, get_logger
 from app.models import Role, User
-from app.routers import annotations, auth, camera_admin, cameras, labels, snapshots, users
+from app.routers import annotations, auth, camera_admin, cameras, inference, labels, snapshots, users
 from app.security import hash_password
 
 configure_logging()
@@ -60,6 +60,7 @@ app.include_router(snapshots.router)
 app.include_router(users.router)
 app.include_router(labels.router)
 app.include_router(annotations.router)
+app.include_router(inference.router)
 
 
 @app.get("/api/health")

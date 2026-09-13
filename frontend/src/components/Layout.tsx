@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
 import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
+import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import VideoSettingsRoundedIcon from "@mui/icons-material/VideoSettingsRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
@@ -70,6 +71,9 @@ export function Layout() {
         <nav className="flex-1 px-3 py-4 space-y-1">
           <NavLink to="/cameras" className={navItemClass}>
             <VideocamRoundedIcon fontSize="small" /> {t("cameras")}
+          </NavLink>
+          <NavLink to="/offline-inference" className={navItemClass}>
+            <UploadFileRoundedIcon fontSize="small" /> {t("offlineInference")}
           </NavLink>
           <NavLink to="/annotation" className={navItemClass}>
             <CropFreeRoundedIcon fontSize="small" /> {t("annotation")}

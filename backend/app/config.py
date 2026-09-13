@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # MJPEG relay, so live inference runs at its own, lower frame rate rather
     # than the stream's ~15 FPS.
     face_inference_fps: float = 2.0
+    max_offline_inference_upload_bytes: int = 10 * 1024 * 1024
 
     # Caps how many distinct cameras can have an active RTSP capture open at
     # once (not viewers — viewers of the same camera share one capture).

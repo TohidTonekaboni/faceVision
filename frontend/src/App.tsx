@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import CameraList from "./pages/CameraList";
 import Annotation from "./pages/Annotation";
+import OfflineInference from "./pages/OfflineInference";
 import UserManagement from "./pages/UserManagement";
 import CameraManagement from "./pages/CameraManagement";
 import { apiClient } from "./api/client";
@@ -41,6 +42,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route path="/cameras" element={<CameraList />} />
+          <Route path="/offline-inference" element={<OfflineInference />} />
           <Route path="/annotation" element={<Annotation />} />
           <Route element={<ProtectedRoute adminOnly />}>
             <Route path="/users" element={<UserManagement />} />
