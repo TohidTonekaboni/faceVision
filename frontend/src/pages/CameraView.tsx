@@ -1,31 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { Button } from "@mui/material";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
 import { useAuthStore } from "../store/authStore";
-import { useCameraStreamUrl, useRunInference } from "../api/queries";
+import { useCameraStreamUrl, useInferenceStreamUrl } from "../api/queries";
 import { useLocale } from "../i18n/LocaleContext";
-
-const INFERENCE_RESULT_DISPLAY_MS = 10_000;
 
 export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () => void }) {
   const { user } = useAuthStore();
-  const runInference = useRunInference();
   const { direction, t } = useLocale();
 
-  // Base64 data URL of the annotated frame while it's temporarily shown in
-  // place of the live stream; null means the live stream is showing.
-  const [inferenceImage, setInferenceImage] = useState<string | null>(null);
-  const [inferenceDetectionCount, setInferenceDetectionCount] = useState<number | null>(null);
-  const [inferenceError, setInferenceError] = useState(false);
-  const restoreTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  // Live inference is opt-in (it costs a CPU-bound detection+recognition
+  // pass per frame on the backend) rather than always-on alongside the raw
+  // stream.
+  const [liveInferenceEnabled, setLiveInferenceEnabled] = useState(false);
+  const [inferenceStreamError, setInferenceStreamError] = useState(false);
 
   // Uses a short-lived, single-camera stream token (minted and re-minted
   // periodically) instead of the long-lived access token, so the token in
   // the <img> src never sits in browser history/logs for long and a
   // long-open live view keeps working past the access token's expiry.
   const { url: streamUrl, reconnect } = useCameraStreamUrl(cameraId);
+  const inferenceStreamUrl = useInferenceStreamUrl(cameraId, liveInferenceEnabled);
 
   // Unknown until the first frame loads, since the camera's native
   // resolution/aspect ratio isn't known ahead of time — the box is sized to
@@ -35,18 +32,9 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
 
   useEffect(() => {
     setAspectRatio(null);
-    setInferenceImage(null);
-    setInferenceDetectionCount(null);
-    setInferenceError(false);
-    clearTimeout(restoreTimeoutRef.current);
+    setLiveInferenceEnabled(false);
+    setInferenceStreamError(false);
   }, [cameraId]);
-
-  useEffect(
-    () => () => {
-      clearTimeout(restoreTimeoutRef.current);
-    },
-    []
-  );
 
   const handleStreamLoad = (event: SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth, naturalHeight } = event.currentTarget;
@@ -59,24 +47,14 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
     reconnect();
   };
 
-  const handleInference = () => {
-    setInferenceError(false);
-    runInference.mutate(cameraId, {
-      onSuccess: (data) => {
-        setInferenceImage(`data:image/jpeg;base64,${data.image}`);
-        setInferenceDetectionCount(data.detections.length);
-        clearTimeout(restoreTimeoutRef.current);
-        restoreTimeoutRef.current = setTimeout(() => {
-          setInferenceImage(null);
-          setInferenceDetectionCount(null);
-        }, INFERENCE_RESULT_DISPLAY_MS);
-      },
-      onError: () => {
-        setInferenceImage(null);
-        setInferenceDetectionCount(null);
-        setInferenceError(true);
-      },
-    });
+  const handleInferenceStreamError = (_event: SyntheticEvent<HTMLImageElement>) => {
+    setInferenceStreamError(true);
+    setLiveInferenceEnabled(false);
+  };
+
+  const toggleLiveInference = () => {
+    setInferenceStreamError(false);
+    setLiveInferenceEnabled((enabled) => !enabled);
   };
 
   return (
@@ -93,10 +71,16 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
           style={aspectRatio ? { aspectRatio } : undefined}
         >
           <span className={`absolute top-3 ${direction === "rtl" ? "right-3" : "left-3"} z-10 flex items-center gap-1.5 text-xs font-semibold text-white bg-black/50 px-2 py-1 rounded-md`}>
-            {inferenceImage ? t("inferenceResult") : <><span className="live-dot" /> {t("live")}</>}
+            {liveInferenceEnabled ? t("liveInference") : <><span className="live-dot" /> {t("live")}</>}
           </span>
-          {inferenceImage ? (
-            <img src={inferenceImage} alt={t("inferenceResult")} className="w-full h-full object-contain" />
+          {liveInferenceEnabled && inferenceStreamUrl ? (
+            <img
+              src={inferenceStreamUrl}
+              alt={t("liveInference")}
+              className="w-full h-full object-contain"
+              onLoad={handleStreamLoad}
+              onError={handleInferenceStreamError}
+            />
           ) : streamUrl ? (
             <img
               src={streamUrl}
@@ -116,16 +100,13 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
           <div className="mt-4 flex items-center gap-3">
             <Button
               variant="contained"
+              color={liveInferenceEnabled ? "error" : "primary"}
               startIcon={<CropFreeRoundedIcon />}
-              onClick={handleInference}
-              disabled={runInference.isPending}
+              onClick={toggleLiveInference}
             >
-              {runInference.isPending ? t("runningInference") : t("runInference")}
+              {liveInferenceEnabled ? t("stopLiveInference") : t("startLiveInference")}
             </Button>
-            {inferenceDetectionCount !== null && (
-              <span className="text-xs text-success font-medium">{t("detectionsFound", { count: String(inferenceDetectionCount) })}</span>
-            )}
-            {inferenceError && <span className="text-xs text-danger font-medium">{t("inferenceFailed")}</span>}
+            {inferenceStreamError && <span className="text-xs text-danger font-medium">{t("inferenceFailed")}</span>}
           </div>
         )}
       </div>

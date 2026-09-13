@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     face_det_thresh: float = 0.5
     face_identify_threshold: float = 0.35
     face_gallery_path: str = "/app/inference/gallery.npz"
+    # CPU inference (RetinaFace + ArcFace per frame) is far slower than raw
+    # MJPEG relay, so live inference runs at its own, lower frame rate rather
+    # than the stream's ~15 FPS.
+    face_inference_fps: float = 2.0
 
     # Caps how many distinct cameras can have an active RTSP capture open at
     # once (not viewers — viewers of the same camera share one capture).

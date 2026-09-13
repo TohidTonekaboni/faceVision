@@ -25,7 +25,7 @@ from app.database import SessionLocal, get_db
 from app.deps import get_current_user, oauth2_scheme, require_admin, resolve_media_user
 from app.inference import run_inference
 from app.logger import get_logger
-from app.models import Camera, Snapshot, User
+from app.models import Camera, Role, Snapshot, User
 from app.schemas import Camera as CameraSchema
 from app.schemas import InferenceResult, SnapshotBatchRequest, SnapshotBatchResult, SnapshotOut, StreamToken
 from app.security import create_media_token, decrypt_camera_password
@@ -86,6 +86,19 @@ async def _get_camera_or_404(camera_id: str, db: AsyncSession) -> Camera:
     return camera
 
 
+async def _resolve_inference_stream_user(token: str | None, camera_id: str, db: AsyncSession) -> User:
+    """Same token flow as resolve_media_user, but also enforces the admin-only
+    restriction that run_camera_inference/require_admin apply — a media token
+    for this resource can only be minted by an admin (see
+    create_inference_stream_token), but a full access token could belong to
+    any logged-in user, so the role check still needs to happen here."""
+    user = await resolve_media_user(token, f"camera-inference:{camera_id}", db)
+    if user.role != Role.super_admin:
+        logger.warning("Forbidden inference stream access attempt by user %r", user.username)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
 def _redact_rtsp_url(rtsp_url: str) -> str:
     """Strips any embedded credentials before the URL is logged."""
     return re.sub(r"rtsp://[^@]+@", "rtsp://", rtsp_url)
@@ -101,6 +114,30 @@ async def _mjpeg_frames(camera_id: str, stream: _SharedCameraStream):
             if frame_bytes is not None:
                 yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
             await asyncio.sleep(FRAME_INTERVAL_SECONDS)
+    finally:
+        camera_stream_hub.release(camera_id, stream)
+
+
+async def _inference_mjpeg_frames(camera_id: str, stream: _SharedCameraStream):
+    """Runs face detection + recognition on the shared stream's latest frame
+    at settings.face_inference_fps (much lower than the raw stream's frame
+    rate — CPU inference per frame is far slower than the JPEG relay this
+    shares its RTSP connection with) and yields the annotated frames as
+    MJPEG, same framing as _mjpeg_frames."""
+    try:
+        while True:
+            tick_started_at = time.monotonic()
+            frame_bytes = stream.latest_jpeg()
+            if frame_bytes is not None:
+                try:
+                    frame = await run_in_threadpool(_decode_jpeg, frame_bytes)
+                    annotated_jpeg, _ = await run_in_threadpool(run_inference, frame)
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + annotated_jpeg + b"\r\n"
+                except Exception:
+                    logger.exception("Live inference failed for camera_id=%r", camera_id)
+            interval = 1 / settings.face_inference_fps
+            elapsed = time.monotonic() - tick_started_at
+            await asyncio.sleep(max(interval - elapsed, 0))
     finally:
         camera_stream_hub.release(camera_id, stream)
 
@@ -186,6 +223,45 @@ async def stream_camera(
 
     logger.info("Started stream for camera %r", cam.name)
     return StreamingResponse(_mjpeg_frames(cam.id, stream), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+@router.post("/{camera_id}/inference-stream-token", response_model=StreamToken)
+async def create_inference_stream_token(
+    camera_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    await _get_camera_or_404(camera_id, db)
+    token = create_media_token(current_user.id, f"camera-inference:{camera_id}")
+    return StreamToken(token=token, expires_in=settings.media_token_expire_seconds)
+
+
+@router.get("/{camera_id}/inference-stream")
+async def stream_camera_inference(
+    camera_id: str,
+    token_header: str | None = Depends(oauth2_scheme),
+    token_query: str | None = Query(default=None, alias="token"),
+    db: AsyncSession = Depends(get_db),
+):
+    await _resolve_inference_stream_user(token_header or token_query, camera_id, db)
+    cam = await _get_camera_or_404(camera_id, db)
+    rtsp_url = _build_rtsp_url(cam)
+
+    try:
+        stream = camera_stream_hub.acquire(cam.id, rtsp_url, _redact_rtsp_url(rtsp_url))
+    except StreamCapacityError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Too many concurrent camera streams; try again later",
+        )
+
+    ready = await run_in_threadpool(stream.wait_ready, READY_TIMEOUT_SECONDS)
+    if not ready or not stream.has_frame():
+        camera_stream_hub.release(cam.id, stream)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not open camera stream")
+
+    logger.info("Started live inference stream for camera %r", cam.name)
+    return StreamingResponse(
+        _inference_mjpeg_frames(cam.id, stream), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 async def _capture_frame_jpeg(cam: Camera) -> tuple[bytes, int, int]:

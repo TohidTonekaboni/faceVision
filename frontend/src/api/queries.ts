@@ -182,6 +182,50 @@ export function useRunInference() {
   });
 }
 
+/**
+ * Mints a short-lived, single-camera inference-stream token (admin-only,
+ * separate resource scope from the plain camera stream token) and points
+ * `url` at the live face-detection MJPEG feed, re-minting shortly before
+ * expiry the same way useCameraStreamUrl does. `url` is null while enabled
+ * is false, so the <img> consuming it can fall back to the live camera feed.
+ */
+export function useInferenceStreamUrl(cameraId: string, enabled: boolean) {
+  const [url, setUrl] = useState<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!enabled) {
+      setUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchToken = async () => {
+      try {
+        const { data } = await apiClient.post<{ token: string; expires_in: number }>(
+          `/api/cameras/${cameraId}/inference-stream-token`
+        );
+        if (cancelled) return;
+        setUrl(`${API_BASE_URL}/api/cameras/${cameraId}/inference-stream?token=${data.token}`);
+        const refreshInMs = Math.max(data.expires_in - 30, 15) * 1000;
+        timeoutRef.current = setTimeout(fetchToken, refreshInMs);
+      } catch {
+        if (!cancelled) timeoutRef.current = setTimeout(fetchToken, 15000);
+      }
+    };
+
+    fetchToken();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutRef.current);
+      setUrl(null);
+    };
+  }, [cameraId, enabled]);
+
+  return url;
+}
+
 export function useDeleteSnapshot() {
   const qc = useQueryClient();
   return useMutation({
