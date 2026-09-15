@@ -47,6 +47,15 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    kafka_bootstrap_servers: str = "kafka:9092"
+    kafka_detections_topic: str = "detections"
+    kafka_consumer_group_id: str = "detection-events-consumer"
+    # How long a gap (in seconds) between two ticks of the same person on the
+    # same camera is tolerated before the presence interval is considered
+    # closed and a new one starts. Keeps detection_events rows as "presence
+    # bars" for reporting instead of one row per inference tick.
+    detection_debounce_seconds: float = 5.0
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

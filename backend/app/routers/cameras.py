@@ -3,6 +3,7 @@ import base64
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import cv2
@@ -24,6 +25,7 @@ from app.config import settings
 from app.database import SessionLocal, get_db
 from app.deps import get_current_user, oauth2_scheme, require_admin, resolve_media_user
 from app.inference import run_inference
+from app.kafka_producer import publish_detection_event
 from app.logger import get_logger
 from app.models import Camera, Role, Snapshot, User
 from app.schemas import Camera as CameraSchema
@@ -118,12 +120,30 @@ async def _mjpeg_frames(camera_id: str, stream: _SharedCameraStream):
         camera_stream_hub.release(camera_id, stream)
 
 
-async def _inference_mjpeg_frames(camera_id: str, stream: _SharedCameraStream):
+async def _publish_detections(camera_id: str, camera_name: str, detections: list[dict]) -> None:
+    detected_at = datetime.now(timezone.utc)
+    for detection in detections:
+        await publish_detection_event(
+            camera_id=camera_id,
+            camera_name=camera_name,
+            label=detection["label"],
+            is_unknown=detection["label"] == "unknown",
+            confidence=detection["confidence"],
+            x=detection["x"],
+            y=detection["y"],
+            width=detection["width"],
+            height=detection["height"],
+            detected_at=detected_at,
+        )
+
+
+async def _inference_mjpeg_frames(camera_id: str, camera_name: str, stream: _SharedCameraStream):
     """Runs face detection + recognition on the shared stream's latest frame
     at settings.face_inference_fps (much lower than the raw stream's frame
     rate — CPU inference per frame is far slower than the JPEG relay this
     shares its RTSP connection with) and yields the annotated frames as
-    MJPEG, same framing as _mjpeg_frames."""
+    MJPEG, same framing as _mjpeg_frames. Each tick's detections are also
+    published to Kafka for the reporting pipeline (see app.kafka_producer)."""
     try:
         while True:
             tick_started_at = time.monotonic()
@@ -131,7 +151,8 @@ async def _inference_mjpeg_frames(camera_id: str, stream: _SharedCameraStream):
             if frame_bytes is not None:
                 try:
                     frame = await run_in_threadpool(_decode_jpeg, frame_bytes)
-                    annotated_jpeg, _ = await run_in_threadpool(run_inference, frame)
+                    annotated_jpeg, detections = await run_in_threadpool(run_inference, frame)
+                    await _publish_detections(camera_id, camera_name, detections)
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + annotated_jpeg + b"\r\n"
                 except Exception:
                     logger.exception("Live inference failed for camera_id=%r", camera_id)
@@ -260,7 +281,7 @@ async def stream_camera_inference(
 
     logger.info("Started live inference stream for camera %r", cam.name)
     return StreamingResponse(
-        _inference_mjpeg_frames(cam.id, stream), media_type="multipart/x-mixed-replace; boundary=frame"
+        _inference_mjpeg_frames(cam.id, cam.name, stream), media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
@@ -408,5 +429,6 @@ async def run_camera_inference(camera_id: str, db: AsyncSession = Depends(get_db
 
     jpeg_bytes, detections = await run_in_threadpool(run_inference, frame)
     logger.info("Ran inference for camera %r, %d detection(s)", cam.name, len(detections))
+    await _publish_detections(cam.id, cam.name, detections)
 
     return InferenceResult(image=base64.b64encode(jpeg_bytes).decode("ascii"), detections=detections)

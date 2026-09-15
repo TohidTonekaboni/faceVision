@@ -8,9 +8,10 @@ from sqlalchemy import select
 from app.camera_stream import camera_stream_hub
 from app.config import settings
 from app.database import SessionLocal
+from app.kafka_producer import start_producer, stop_producer
 from app.logger import configure_logging, get_logger
 from app.models import Role, User
-from app.routers import annotations, auth, camera_admin, cameras, inference, labels, snapshots, users
+from app.routers import annotations, auth, camera_admin, cameras, inference, labels, reporting, snapshots, users
 from app.security import hash_password
 
 configure_logging()
@@ -38,9 +39,11 @@ async def lifespan(_: FastAPI):
     os.makedirs(settings.snapshot_dir, exist_ok=True)
     # Schema is managed by Alembic migrations (run via the container entrypoint).
     await _bootstrap_admin()
+    await start_producer()
     logger.info("FaceVision API startup complete")
     yield
     camera_stream_hub.stop_all()
+    await stop_producer()
 
 
 app = FastAPI(title="FaceVision API", lifespan=lifespan)
@@ -61,6 +64,7 @@ app.include_router(users.router)
 app.include_router(labels.router)
 app.include_router(annotations.router)
 app.include_router(inference.router)
+app.include_router(reporting.router)
 
 
 @app.get("/api/health")

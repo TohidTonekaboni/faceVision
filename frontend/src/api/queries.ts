@@ -347,6 +347,98 @@ export function useDeleteAnnotation() {
  * long-lived access token in the <img> src, and re-mints it shortly before
  * expiry so a long-open live view keeps working without a manual refresh.
  */
+export interface Person {
+  id: string;
+  display_name: string;
+  is_unknown: boolean;
+}
+
+export interface DetectionEvent {
+  id: string;
+  person_id: string;
+  person_name: string;
+  camera_id: string | null;
+  camera_name: string;
+  started_at: string;
+  ended_at: string;
+  detection_count: number;
+  max_confidence: number | null;
+}
+
+export interface DetectionEventPage {
+  items: DetectionEvent[];
+  total: number;
+}
+
+export interface DetectionEventFilters {
+  dateFrom: string;
+  dateTo: string;
+  personIds?: string[];
+  cameraIds?: string[];
+  includeUnknown?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+function toEventQueryParams(filters: DetectionEventFilters) {
+  return {
+    date_from: filters.dateFrom,
+    date_to: filters.dateTo,
+    person_ids: filters.personIds,
+    camera_ids: filters.cameraIds,
+    include_unknown: filters.includeUnknown,
+    page: filters.page,
+    page_size: filters.pageSize,
+  };
+}
+
+export function usePeople() {
+  return useQuery({
+    queryKey: ["reporting", "people"],
+    queryFn: async () => (await apiClient.get<Person[]>("/api/reporting/people")).data,
+  });
+}
+
+export function useDetectionEvents(filters: DetectionEventFilters) {
+  return useQuery({
+    queryKey: ["reporting", "events", filters],
+    queryFn: async () =>
+      (
+        await apiClient.get<DetectionEventPage>("/api/reporting/events", {
+          params: toEventQueryParams(filters),
+        })
+      ).data,
+  });
+}
+
+export function usePersonTimeline(personId: string | null, date: string, tzOffsetMinutes: number) {
+  return useQuery({
+    queryKey: ["reporting", "timeline", personId, date],
+    queryFn: async () =>
+      (
+        await apiClient.get<DetectionEvent[]>(`/api/reporting/people/${personId}/timeline`, {
+          params: { date, tz_offset_minutes: tzOffsetMinutes },
+        })
+      ).data,
+    enabled: !!personId,
+  });
+}
+
+/** Builds a direct-download URL for the CSV export endpoint. The access
+ * token is passed as a query param (same convention as the stream/snapshot
+ * media endpoints) since a plain anchor download can't attach an
+ * Authorization header. */
+export function buildEventsExportUrl(filters: DetectionEventFilters, accessToken: string): string {
+  const params = new URLSearchParams();
+  params.set("date_from", filters.dateFrom);
+  params.set("date_to", filters.dateTo);
+  (filters.personIds ?? []).forEach((id) => params.append("person_ids", id));
+  (filters.cameraIds ?? []).forEach((id) => params.append("camera_ids", id));
+  if (filters.includeUnknown) params.set("include_unknown", "true");
+  params.set("token", accessToken);
+  return `${API_BASE_URL}/api/reporting/events/export.csv?${params.toString()}`;
+}
+
 export function useCameraStreamUrl(cameraId: string) {
   const [url, setUrl] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();

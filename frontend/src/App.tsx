@@ -8,6 +8,7 @@ import Annotation from "./pages/Annotation";
 import OfflineInference from "./pages/OfflineInference";
 import UserManagement from "./pages/UserManagement";
 import CameraManagement from "./pages/CameraManagement";
+import Reporting from "./pages/Reporting";
 import { apiClient } from "./api/client";
 import { useAuthStore } from "./store/authStore";
 
@@ -47,6 +48,7 @@ export default function App() {
           <Route element={<ProtectedRoute adminOnly />}>
             <Route path="/users" element={<UserManagement />} />
             <Route path="/camera-management" element={<CameraManagement />} />
+            <Route path="/reporting" element={<Reporting />} />
           </Route>
         </Route>
       </Route>

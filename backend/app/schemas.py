@@ -150,6 +150,33 @@ class AnnotationOut(BaseModel):
     height: float
 
 
+class PersonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    display_name: str
+    is_unknown: bool
+
+
+class DetectionEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    person_id: str
+    person_name: str
+    camera_id: str | None
+    camera_name: str
+    started_at: datetime
+    ended_at: datetime
+    detection_count: int
+    max_confidence: float | None
+
+
+class DetectionEventPage(BaseModel):
+    items: list[DetectionEventOut]
+    total: int
+
+
 class AnnotationCreate(BaseModel):
     snapshot_id: str
     label_id: str

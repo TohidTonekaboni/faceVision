@@ -99,6 +99,42 @@ class Annotation(Base):
     label: Mapped["Label"] = relationship()
 
 
+class Person(Base):
+    __tablename__ = "people"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    display_name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    is_unknown: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DetectionEvent(Base):
+    """A presence interval: a person seen continuously on one camera. Rows are
+    extended in place (ended_at, detection_count, max_confidence) by the
+    events consumer while ticks keep arriving within the debounce gap, and
+    left as-is (never further mutated) once the gap is exceeded — see
+    app/worker/events_consumer.py."""
+
+    __tablename__ = "detection_events"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    person_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("people.id"), nullable=False, index=True
+    )
+    camera_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    camera_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    detection_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    max_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    person: Mapped["Person"] = relationship()
+    camera: Mapped["Camera | None"] = relationship()
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 

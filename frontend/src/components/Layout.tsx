@@ -4,6 +4,7 @@ import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import VideoSettingsRoundedIcon from "@mui/icons-material/VideoSettingsRounded";
+import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import StopRoundedIcon from "@mui/icons-material/StopRounded";
 import { Avatar, IconButton, Tooltip } from "@mui/material";
@@ -85,6 +86,9 @@ export function Layout() {
               </NavLink>
               <NavLink to="/users" className={navItemClass}>
                 <GroupRoundedIcon fontSize="small" /> {t("userManagement")}
+              </NavLink>
+              <NavLink to="/reporting" className={navItemClass}>
+                <AssessmentRoundedIcon fontSize="small" /> {t("reporting")}
               </NavLink>
             </>
           )}
