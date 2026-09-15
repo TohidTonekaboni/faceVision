@@ -39,7 +39,7 @@ Camera (RTSP) → backend (RetinaFace + ArcFace) → live MJPEG stream to UI
 - **Camera & user management** (admin only).
 - **Event streaming & reporting** (admin only) — every detection is published to Kafka, persisted as a presence interval per (person, camera) in Postgres, and browsable on the `/reporting` page:
   - Filter by date range, person, and camera; the date picker follows the site's language (English/Gregorian or Persian/Jalali).
-  - Per-person 24-hour timeline showing which camera(s) they were seen on and when.
+  - A per-camera 24-hour timeline chart (cameras on the vertical axis, time of day on the horizontal axis) showing exactly when each selected person was seen on which camera(s), color-coded per person with overlapping detections split into separate lanes.
   - CSV export of the filtered results.
   - See [`docs/reporting.md`](docs/reporting.md) for retention guidance and deferred/future scope (path reconstruction, live "who's on-site" dashboard, alerting).
 

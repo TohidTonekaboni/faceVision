@@ -7,7 +7,6 @@ import {
   TextField,
 } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
-import TimelineRoundedIcon from "@mui/icons-material/TimelineRounded";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
@@ -17,7 +16,7 @@ import dayjs from "../i18n/dayjsSetup";
 import { useCameras, useDetectionEvents, usePeople, buildEventsExportUrl } from "../api/queries";
 import { useAuthStore } from "../store/authStore";
 import { useLocale } from "../i18n/LocaleContext";
-import { PersonTimeline } from "../components/PersonTimeline";
+import { CameraTimelineChart } from "../components/CameraTimelineChart";
 
 const toGregorianIso = (value: dayjs.Dayjs | null) => (value ? value.calendar("gregory").format("YYYY-MM-DD") : "");
 
@@ -33,10 +32,10 @@ export default function Reporting() {
   const today = useMemo(() => dayjs().calendar("gregory").format("YYYY-MM-DD"), []);
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
+  const [timelineDate, setTimelineDate] = useState(today);
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [selectedCameraIds, setSelectedCameraIds] = useState<string[]>([]);
   const [includeUnknown, setIncludeUnknown] = useState(false);
-  const [timelinePersonId, setTimelinePersonId] = useState<string | null>(null);
 
   const { data: people } = usePeople();
   const { data: cameras } = useCameras();
@@ -47,9 +46,17 @@ export default function Reporting() {
     cameraIds: selectedCameraIds.length ? selectedCameraIds : undefined,
     includeUnknown,
   });
+  const { data: timelineEvents } = useDetectionEvents({
+    dateFrom: timelineDate,
+    dateTo: timelineDate,
+    personIds: selectedPersonIds.length ? selectedPersonIds : undefined,
+    cameraIds: selectedCameraIds.length ? selectedCameraIds : undefined,
+    includeUnknown,
+    pageSize: 500,
+  });
 
   const selectablePeople = (people ?? []).filter((p) => includeUnknown || !p.is_unknown);
-  const timelinePerson = (people ?? []).find((p) => p.id === timelinePersonId);
+  const selectedCameras = (cameras ?? []).filter((c) => selectedCameraIds.length === 0 || selectedCameraIds.includes(c.id));
 
   const handleExport = () => {
     if (!accessToken) return;
@@ -125,6 +132,23 @@ export default function Reporting() {
           />
         </div>
 
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <h2 className="text-sm font-semibold">{t("cameraTimeline")}</h2>
+            <DatePicker
+              label={t("timelineDate")}
+              value={dayjs(timelineDate)}
+              onChange={(value) => value && setTimelineDate(toGregorianIso(value))}
+              slotProps={{ textField: { size: "small" } }}
+            />
+          </div>
+          <CameraTimelineChart
+            events={timelineEvents?.items ?? []}
+            cameras={selectedCameras}
+            dateIso={timelineDate}
+          />
+        </div>
+
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-subtle text-inkDim text-xs uppercase tracking-wide">
@@ -134,7 +158,6 @@ export default function Reporting() {
                 <th className="text-left px-4 py-2.5 font-semibold">{t("startedAt")}</th>
                 <th className="text-left px-4 py-2.5 font-semibold">{t("endedAt")}</th>
                 <th className="text-left px-4 py-2.5 font-semibold">{t("detectionCount")}</th>
-                <th className="text-left px-4 py-2.5"></th>
               </tr>
             </thead>
             <tbody>
@@ -147,15 +170,6 @@ export default function Reporting() {
                   <td className="px-4 py-2.5 text-inkDim">{new Date(event.started_at).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-inkDim">{new Date(event.ended_at).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-inkDim">{event.detection_count}</td>
-                  <td className="px-4 py-2.5">
-                    <Button
-                      size="small"
-                      startIcon={<TimelineRoundedIcon fontSize="small" />}
-                      onClick={() => setTimelinePersonId(event.person_id)}
-                    >
-                      {t("viewTimeline")}
-                    </Button>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -165,10 +179,6 @@ export default function Reporting() {
           )}
           {isLoading && <p className="text-sm text-inkDim px-4 py-6">{t("loadingEvents")}</p>}
         </div>
-
-        {timelinePerson && (
-          <PersonTimeline personId={timelinePerson.id} personName={timelinePerson.display_name} date={dateFrom} />
-        )}
       </div>
     </LocalizationProvider>
   );
