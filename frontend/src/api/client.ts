@@ -3,8 +3,25 @@ import { useAuthStore } from "../store/authStore";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+// Serializes array params as repeated plain keys (person_ids=a&person_ids=b)
+// instead of axios's default bracket notation (person_ids[]=a&person_ids[]=b),
+// which FastAPI's `Query(default=None)` list params don't parse.
+function serializeParams(params: Record<string, unknown>): string {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      value.forEach((item) => searchParams.append(key, String(item)));
+    } else {
+      searchParams.append(key, String(value));
+    }
+  }
+  return searchParams.toString();
+}
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  paramsSerializer: serializeParams,
 });
 
 // Separate instance (no interceptors) so refresh calls can't recurse into the
