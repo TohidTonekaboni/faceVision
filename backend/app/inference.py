@@ -48,7 +48,7 @@ def _get_models() -> tuple[RetinaFace, ArcFace, Gallery]:
 
 
 def _draw_detection(frame: np.ndarray, x1: float, y1: float, x2: float, y2: float, label: str, score: float) -> None:
-    color = (0, 0, 255) if label == "unknown" else (0, 200, 0)
+    color = (0, 0, 255) if label == "unknown" else (200, 0, 128)
     cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
     caption = f"{label} {score:.2f}"
     cv2.putText(frame, caption, (int(x1), max(int(y1) - 8, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
