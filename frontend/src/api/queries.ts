@@ -188,6 +188,15 @@ export async function stopInferenceSession(cameraIds: string[]): Promise<void> {
   await apiClient.post("/api/cameras/inference-session/stop", { camera_ids: cameraIds });
 }
 
+/** Which cameras currently have a running background inference session —
+ * lets the frontend resync its (otherwise client-only) session state after
+ * a page reload or a fresh login, since the session itself keeps running
+ * server-side regardless of either. */
+export async function fetchInferenceSessionStatus(): Promise<string[]> {
+  const { data } = await apiClient.get<string[]>("/api/cameras/inference-session/status");
+  return data;
+}
+
 export function useRunInference() {
   return useMutation({
     mutationFn: async (cameraId: string) =>

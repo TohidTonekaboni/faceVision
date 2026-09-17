@@ -164,19 +164,30 @@ async def _inference_tick(camera_id: str, camera_name: str, stream: _SharedCamer
         return None
 
 
+# Latest annotated JPEG produced by each camera's background session tick
+# (see _inference_session_loop). Lets a viewer's own /inference-stream just
+# relay these instead of running a second, fully redundant detection +
+# recognition pass on the same camera at the same time.
+_session_annotated_frames: dict[str, bytes] = {}
+
+
 async def _inference_session_loop(camera_id: str, camera_name: str, stream: _SharedCameraStream) -> None:
     """Background counterpart to _inference_mjpeg_frames: runs the same
-    per-tick inference at settings.face_inference_fps, but purely for its
-    Kafka side effect — nothing consumes the annotated frame. Keeps running
-    until cancelled by /inference-session/stop."""
+    per-tick inference at settings.face_inference_fps. Its annotated frame is
+    cached (for any viewer that opens this camera) and its detections are
+    published to Kafka. Keeps running until cancelled by
+    /inference-session/stop."""
     try:
         while True:
             tick_started_at = time.monotonic()
-            await _inference_tick(camera_id, camera_name, stream)
+            annotated_jpeg = await _inference_tick(camera_id, camera_name, stream)
+            if annotated_jpeg is not None:
+                _session_annotated_frames[camera_id] = annotated_jpeg
             interval = 1 / settings.face_inference_fps
             elapsed = time.monotonic() - tick_started_at
             await asyncio.sleep(max(interval - elapsed, 0))
     finally:
+        _session_annotated_frames.pop(camera_id, None)
         camera_stream_hub.release(camera_id, stream)
 
 
@@ -186,16 +197,27 @@ async def _inference_mjpeg_frames(camera_id: str, camera_name: str, stream: _Sha
     rate — CPU inference per frame is far slower than the JPEG relay this
     shares its RTSP connection with) and yields the annotated frames as
     MJPEG, same framing as _mjpeg_frames. Each tick's detections are also
-    published to Kafka for the reporting pipeline (see app.kafka_producer)."""
+    published to Kafka for the reporting pipeline (see app.kafka_producer).
+
+    If a background inference session (see _inference_session_loop) is
+    already running for this camera, this just relays its cached annotated
+    frames at the raw stream's poll rate instead of running its own tick —
+    otherwise viewing a camera that's part of a running session would pay
+    for detection + recognition twice, doubling CPU cost for no benefit."""
     try:
         while True:
             tick_started_at = time.monotonic()
-            annotated_jpeg = await _inference_tick(camera_id, camera_name, stream)
+            if camera_id in _inference_session_tasks:
+                annotated_jpeg = _session_annotated_frames.get(camera_id)
+                sleep_for = FRAME_INTERVAL_SECONDS
+            else:
+                annotated_jpeg = await _inference_tick(camera_id, camera_name, stream)
+                interval = 1 / settings.face_inference_fps
+                elapsed = time.monotonic() - tick_started_at
+                sleep_for = max(interval - elapsed, 0)
             if annotated_jpeg is not None:
                 yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + annotated_jpeg + b"\r\n"
-            interval = 1 / settings.face_inference_fps
-            elapsed = time.monotonic() - tick_started_at
-            await asyncio.sleep(max(interval - elapsed, 0))
+            await asyncio.sleep(sleep_for)
     finally:
         camera_stream_hub.release(camera_id, stream)
 
@@ -417,6 +439,16 @@ async def stop_snapshot_session(payload: SnapshotBatchRequest, _: User = Depends
         entry = _session_streams.pop(camera_id, None)
         if entry is not None:
             camera_stream_hub.release(camera_id, entry[0])
+
+
+@router.get("/inference-session/status", response_model=list[str])
+async def get_inference_session_status(_: User = Depends(require_admin)) -> list[str]:
+    """Lets the frontend rehydrate which cameras have a running background
+    inference session — the session itself isn't tied to any user's login or
+    browser tab (see start_inference_session), but the UI's notion of "is it
+    running" is otherwise just in-memory client state that's lost on page
+    reload, logout, or a fresh login elsewhere."""
+    return list(_inference_session_tasks.keys())
 
 
 @router.post("/inference-session/start", response_model=list[str])

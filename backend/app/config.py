@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     # MJPEG relay, so live inference runs at its own, lower frame rate rather
     # than the stream's ~15 FPS.
     face_inference_fps: float = 2.0
+    # ONNX Runtime's default is to parallelize *each* session's ops across
+    # every CPU core. That's fine for one session, but a live-inference
+    # session per camera means several sessions running concurrently (via
+    # the threadpool) each trying to claim every core at once — the
+    # oversubscription slows every camera down, not just one. Pinning each
+    # session to a small, fixed thread budget instead lets concurrency across
+    # cameras (not within a single frame) do the parallelizing.
+    face_onnx_intra_op_threads: int = 1
+    face_onnx_inter_op_threads: int = 1
     max_offline_inference_upload_bytes: int = 10 * 1024 * 1024
 
     # Caps how many distinct cameras can have an active RTSP capture open at

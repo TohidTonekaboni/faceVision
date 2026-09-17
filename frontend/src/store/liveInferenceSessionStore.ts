@@ -6,6 +6,11 @@ interface LiveInferenceSessionState {
   cameraIds: string[];
   start: (cameraIds: string[]) => void;
   stop: () => void;
+  /** Adopts an already-running backend session (see fetchInferenceSessionStatus)
+   * without re-POSTing to /inference-session/start — used to resync this
+   * client-only state after a page reload or a fresh login, since the
+   * session itself already kept running server-side regardless. */
+  hydrate: (cameraIds: string[]) => void;
 }
 
 // Lives in an app-level store (not page state), mirroring
@@ -33,5 +38,9 @@ export const useLiveInferenceSessionStore = create<LiveInferenceSessionState>((s
     stopInferenceSession(cameraIds).catch((error) => {
       console.warn("Failed to stop background inference session", error);
     });
+  },
+  hydrate: (cameraIds) => {
+    if (get().isRunning || cameraIds.length === 0) return;
+    set({ isRunning: true, cameraIds });
   },
 }));

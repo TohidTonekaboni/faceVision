@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
 import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
@@ -9,6 +10,7 @@ import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import StopRoundedIcon from "@mui/icons-material/StopRounded";
 import { Avatar, IconButton, Tooltip } from "@mui/material";
 import { apiClient } from "../api/client";
+import { fetchInferenceSessionStatus } from "../api/queries";
 import { useAuthStore } from "../store/authStore";
 import { useSnapshotSessionStore } from "../store/snapshotSessionStore";
 import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
@@ -48,6 +50,20 @@ export function Layout() {
   const isInferenceRunning = useLiveInferenceSessionStore((state) => state.isRunning);
   const inferenceCameraIds = useLiveInferenceSessionStore((state) => state.cameraIds);
   const stopInferenceSession = useLiveInferenceSessionStore((state) => state.stop);
+  const hydrateInferenceSession = useLiveInferenceSessionStore((state) => state.hydrate);
+
+  // The session itself runs entirely server-side and outlives any single
+  // login (see liveInferenceSessionStore), but this store's isRunning flag
+  // is just in-memory client state — reset on page reload or a fresh login.
+  // Resync it here once per mount so the UI doesn't show "not running" (and
+  // CameraView doesn't hide the annotated feed) for a session that's
+  // actually still active on the backend.
+  useEffect(() => {
+    if (user?.role !== "super_admin") return;
+    fetchInferenceSessionStatus()
+      .then((cameraIds) => hydrateInferenceSession(cameraIds))
+      .catch(() => {});
+  }, [user?.role, hydrateInferenceSession]);
 
   return (
     <div className="flex h-screen bg-canvas text-ink font-display">

@@ -4,9 +4,11 @@ from dataclasses import dataclass
 
 import numpy as np
 import onnxruntime
-from insightface.model_zoo import get_model
+from insightface.model_zoo.scrfd import SCRFD
 from insightface.utils import face_align
 from insightface.utils.storage import ensure_available
+
+from app.onnx_session import build_cpu_session
 
 # silence a benign onnxruntime shape-hint warning triggered by using a
 # non-default det_size with det_10g.onnx (output shape is still correct)
@@ -30,7 +32,8 @@ class RetinaFace:
     ):
         """ctx_id: -1 for CPU, >=0 for GPU device id."""
         model_dir = ensure_available("models", model_name)
-        self.model = get_model(f"{model_dir}/det_10g.onnx")
+        model_path = f"{model_dir}/det_10g.onnx"
+        self.model = SCRFD(model_file=model_path, session=build_cpu_session(model_path))
         self.model.prepare(ctx_id=ctx_id, det_thresh=det_thresh, input_size=det_size)
 
     def detect(self, image: np.ndarray) -> list[DetectedFace]:
