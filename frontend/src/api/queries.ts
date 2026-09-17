@@ -175,6 +175,19 @@ export async function stopSnapshotSession(cameraIds: string[]): Promise<void> {
   await apiClient.post("/api/cameras/snapshot-session/stop", { camera_ids: cameraIds });
 }
 
+/** Starts a background inference loop per camera on the backend — running
+ * detection + recognition and publishing to Kafka regardless of whether
+ * anyone is viewing that camera's stream, so it isn't bounded by the
+ * browser's per-origin connection limit the way N concurrent MJPEG viewers
+ * would be. Call stopInferenceSession with the same ids when the session ends. */
+export async function startInferenceSession(cameraIds: string[]): Promise<void> {
+  await apiClient.post("/api/cameras/inference-session/start", { camera_ids: cameraIds });
+}
+
+export async function stopInferenceSession(cameraIds: string[]): Promise<void> {
+  await apiClient.post("/api/cameras/inference-session/stop", { camera_ids: cameraIds });
+}
+
 export function useRunInference() {
   return useMutation({
     mutationFn: async (cameraId: string) =>

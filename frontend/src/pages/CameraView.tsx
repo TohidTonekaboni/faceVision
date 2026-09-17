@@ -1,20 +1,25 @@
 import { useEffect, useState } from "react";
 import type { SyntheticEvent } from "react";
-import { Button } from "@mui/material";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
-import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
 import { useAuthStore } from "../store/authStore";
 import { useCameraStreamUrl, useInferenceStreamUrl } from "../api/queries";
+import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
 import { useLocale } from "../i18n/LocaleContext";
 
 export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () => void }) {
   const { user } = useAuthStore();
   const { direction, t } = useLocale();
 
-  // Live inference is opt-in (it costs a CPU-bound detection+recognition
-  // pass per frame on the backend) rather than always-on alongside the raw
-  // stream.
-  const [liveInferenceEnabled, setLiveInferenceEnabled] = useState(false);
+  // Live inference is started/stopped for all cameras at once from the
+  // cameras page (see CameraList), not per camera — this view just reflects
+  // whether the current camera is part of that running session. Only admins
+  // can mint inference-stream tokens on the backend, so non-admins always
+  // fall back to the plain live feed even if a session happens to be running.
+  const isInferenceSessionRunning = useLiveInferenceSessionStore((s) => s.isRunning);
+  const inferenceCameraIds = useLiveInferenceSessionStore((s) => s.cameraIds);
+  const liveInferenceEnabled =
+    user?.role === "super_admin" && isInferenceSessionRunning && inferenceCameraIds.includes(cameraId);
+
   const [inferenceStreamError, setInferenceStreamError] = useState(false);
 
   // Uses a short-lived, single-camera stream token (minted and re-minted
@@ -32,7 +37,6 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
 
   useEffect(() => {
     setAspectRatio(null);
-    setLiveInferenceEnabled(false);
     setInferenceStreamError(false);
   }, [cameraId]);
 
@@ -49,13 +53,9 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
 
   const handleInferenceStreamError = (_event: SyntheticEvent<HTMLImageElement>) => {
     setInferenceStreamError(true);
-    setLiveInferenceEnabled(false);
   };
 
-  const toggleLiveInference = () => {
-    setInferenceStreamError(false);
-    setLiveInferenceEnabled((enabled) => !enabled);
-  };
+  const showInference = liveInferenceEnabled && !inferenceStreamError && !!inferenceStreamUrl;
 
   return (
     <div className="p-8">
@@ -71,11 +71,11 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
           style={aspectRatio ? { aspectRatio } : undefined}
         >
           <span className={`absolute top-3 ${direction === "rtl" ? "right-3" : "left-3"} z-10 flex items-center gap-1.5 text-xs font-semibold text-white bg-black/50 px-2 py-1 rounded-md`}>
-            {liveInferenceEnabled ? t("liveInference") : <><span className="live-dot" /> {t("live")}</>}
+            {showInference ? t("liveInference") : <><span className="live-dot" /> {t("live")}</>}
           </span>
-          {liveInferenceEnabled && inferenceStreamUrl ? (
+          {showInference ? (
             <img
-              src={inferenceStreamUrl}
+              src={inferenceStreamUrl!}
               alt={t("liveInference")}
               className="w-full h-full object-contain"
               onLoad={handleStreamLoad}
@@ -96,18 +96,8 @@ export function CameraView({ cameraId, onBack }: { cameraId: string; onBack: () 
           )}
         </div>
 
-        {user?.role === "super_admin" && (
-          <div className="mt-4 flex items-center gap-3">
-            <Button
-              variant="contained"
-              color={liveInferenceEnabled ? "error" : "primary"}
-              startIcon={<CropFreeRoundedIcon />}
-              onClick={toggleLiveInference}
-            >
-              {liveInferenceEnabled ? t("stopLiveInference") : t("startLiveInference")}
-            </Button>
-            {inferenceStreamError && <span className="text-xs text-danger font-medium">{t("inferenceFailed")}</span>}
-          </div>
+        {liveInferenceEnabled && inferenceStreamError && (
+          <p className="mt-4 text-xs text-danger font-medium">{t("inferenceFailed")}</p>
         )}
       </div>
     </div>

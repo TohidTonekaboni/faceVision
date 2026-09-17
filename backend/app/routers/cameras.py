@@ -52,6 +52,15 @@ _session_streams: dict[str, tuple[_SharedCameraStream, float]] = {}
 # session is never mistaken for an abandoned one.
 _SESSION_STREAM_TTL_SECONDS = 30.0
 
+# Background live-inference sessions: camera_id -> (task, stream). Unlike the
+# per-viewer /inference-stream endpoint, these run entirely server-side and
+# don't depend on a browser keeping an MJPEG connection open — starting a
+# session for many cameras at once would otherwise need one persistent
+# streaming connection per camera, easily exceeding the browser's per-origin
+# connection limit and starving whichever camera the user actually opens to
+# view. See /inference-session/start.
+_inference_session_tasks: dict[str, tuple["asyncio.Task[None]", _SharedCameraStream]] = {}
+
 
 def _sweep_expired_session_streams() -> None:
     now = time.monotonic()
@@ -137,6 +146,40 @@ async def _publish_detections(camera_id: str, camera_name: str, detections: list
         )
 
 
+async def _inference_tick(camera_id: str, camera_name: str, stream: _SharedCameraStream) -> bytes | None:
+    """Runs one detection + recognition pass on the shared stream's latest
+    frame, publishes the tick's detections to Kafka, and returns the
+    annotated JPEG (or None if the stream has no frame yet, or the tick
+    failed)."""
+    frame_bytes = stream.latest_jpeg()
+    if frame_bytes is None:
+        return None
+    try:
+        frame = await run_in_threadpool(_decode_jpeg, frame_bytes)
+        annotated_jpeg, detections = await run_in_threadpool(run_inference, frame)
+        await _publish_detections(camera_id, camera_name, detections)
+        return annotated_jpeg
+    except Exception:
+        logger.exception("Live inference failed for camera_id=%r", camera_id)
+        return None
+
+
+async def _inference_session_loop(camera_id: str, camera_name: str, stream: _SharedCameraStream) -> None:
+    """Background counterpart to _inference_mjpeg_frames: runs the same
+    per-tick inference at settings.face_inference_fps, but purely for its
+    Kafka side effect — nothing consumes the annotated frame. Keeps running
+    until cancelled by /inference-session/stop."""
+    try:
+        while True:
+            tick_started_at = time.monotonic()
+            await _inference_tick(camera_id, camera_name, stream)
+            interval = 1 / settings.face_inference_fps
+            elapsed = time.monotonic() - tick_started_at
+            await asyncio.sleep(max(interval - elapsed, 0))
+    finally:
+        camera_stream_hub.release(camera_id, stream)
+
+
 async def _inference_mjpeg_frames(camera_id: str, camera_name: str, stream: _SharedCameraStream):
     """Runs face detection + recognition on the shared stream's latest frame
     at settings.face_inference_fps (much lower than the raw stream's frame
@@ -147,15 +190,9 @@ async def _inference_mjpeg_frames(camera_id: str, camera_name: str, stream: _Sha
     try:
         while True:
             tick_started_at = time.monotonic()
-            frame_bytes = stream.latest_jpeg()
-            if frame_bytes is not None:
-                try:
-                    frame = await run_in_threadpool(_decode_jpeg, frame_bytes)
-                    annotated_jpeg, detections = await run_in_threadpool(run_inference, frame)
-                    await _publish_detections(camera_id, camera_name, detections)
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + annotated_jpeg + b"\r\n"
-                except Exception:
-                    logger.exception("Live inference failed for camera_id=%r", camera_id)
+            annotated_jpeg = await _inference_tick(camera_id, camera_name, stream)
+            if annotated_jpeg is not None:
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + annotated_jpeg + b"\r\n"
             interval = 1 / settings.face_inference_fps
             elapsed = time.monotonic() - tick_started_at
             await asyncio.sleep(max(interval - elapsed, 0))
@@ -380,6 +417,46 @@ async def stop_snapshot_session(payload: SnapshotBatchRequest, _: User = Depends
         entry = _session_streams.pop(camera_id, None)
         if entry is not None:
             camera_stream_hub.release(camera_id, entry[0])
+
+
+@router.post("/inference-session/start", response_model=list[str])
+async def start_inference_session(
+    payload: SnapshotBatchRequest, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)
+) -> list[str]:
+    """Starts a background inference loop per listed camera (see
+    _inference_session_loop) that keeps running — and publishing detections
+    to Kafka — regardless of whether anyone is viewing that camera's stream.
+    Idempotent per camera. Returns the subset of camera_ids now running (a
+    camera can be skipped if it doesn't exist or the server is already at
+    its concurrent stream cap)."""
+    started: list[str] = []
+    for camera_id in dict.fromkeys(payload.camera_ids):
+        if camera_id in _inference_session_tasks:
+            started.append(camera_id)
+            continue
+
+        camera = await db.get(Camera, camera_id)
+        if camera is None:
+            continue
+        rtsp_url = _build_rtsp_url(camera)
+        try:
+            stream = camera_stream_hub.acquire(camera_id, rtsp_url, _redact_rtsp_url(rtsp_url))
+        except StreamCapacityError:
+            logger.warning("Could not start inference session for camera_id=%r: at capacity", camera_id)
+            continue
+        task = asyncio.create_task(_inference_session_loop(camera_id, camera.name, stream))
+        _inference_session_tasks[camera_id] = (task, stream)
+        started.append(camera_id)
+    return started
+
+
+@router.post("/inference-session/stop", status_code=status.HTTP_204_NO_CONTENT)
+async def stop_inference_session(payload: SnapshotBatchRequest, _: User = Depends(require_admin)) -> None:
+    for camera_id in payload.camera_ids:
+        entry = _inference_session_tasks.pop(camera_id, None)
+        if entry is not None:
+            task, _stream = entry
+            task.cancel()
 
 
 @router.post("/snapshot-batch", response_model=list[SnapshotBatchResult])

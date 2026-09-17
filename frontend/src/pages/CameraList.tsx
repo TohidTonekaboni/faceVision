@@ -11,9 +11,11 @@ import {
 import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
 import PhotoCameraRoundedIcon from "@mui/icons-material/PhotoCameraRounded";
 import StopRoundedIcon from "@mui/icons-material/StopRounded";
+import CropFreeRoundedIcon from "@mui/icons-material/CropFreeRounded";
 import { useCameras } from "../api/queries";
 import { useAuthStore } from "../store/authStore";
 import { useSnapshotSessionStore } from "../store/snapshotSessionStore";
+import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
 import { CameraView } from "./CameraView";
 import { useLocale } from "../i18n/LocaleContext";
 
@@ -28,6 +30,10 @@ export default function CameraList() {
   const isSessionRunning = useSnapshotSessionStore((state) => state.isRunning);
   const startSession = useSnapshotSessionStore((state) => state.start);
   const stopSession = useSnapshotSessionStore((state) => state.stop);
+
+  const isInferenceRunning = useLiveInferenceSessionStore((state) => state.isRunning);
+  const startInferenceSession = useLiveInferenceSessionStore((state) => state.start);
+  const stopInferenceSession = useLiveInferenceSessionStore((state) => state.stop);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCameraIds, setSelectedCameraIds] = useState<Set<string>>(new Set());
@@ -53,6 +59,16 @@ export default function CameraList() {
     if (selectedCameraIds.size === 0) return;
     startSession(Array.from(selectedCameraIds));
     setModalOpen(false);
+  };
+
+  const handleToggleInference = () => {
+    if (isInferenceRunning) {
+      stopInferenceSession();
+      return;
+    }
+    const cameraIds = (cameras ?? []).map((cam) => cam.id);
+    if (cameraIds.length === 0) return;
+    startInferenceSession(cameraIds);
   };
 
   if (isLoading) {
@@ -88,6 +104,15 @@ export default function CameraList() {
               disabled={!isSessionRunning}
             >
               {t("stopSnapshot")}
+            </Button>
+            <Button
+              variant="contained"
+              color={isInferenceRunning ? "error" : "primary"}
+              startIcon={<CropFreeRoundedIcon />}
+              onClick={handleToggleInference}
+              disabled={!isInferenceRunning && (cameras ?? []).length === 0}
+            >
+              {isInferenceRunning ? t("stopLiveInference") : t("startLiveInference")}
             </Button>
           </div>
         )}

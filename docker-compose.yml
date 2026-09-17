@@ -36,6 +36,7 @@ services:
       KAFKA_DETECTIONS_TOPIC: detections
     volumes:
       - snapshots:/app/storage/snapshots
+      - insightface_models:/root/.insightface
     ports:
       - "8000:8000"
 
@@ -108,3 +109,4 @@ volumes:
   db_data:
   snapshots:
   kafka_data:
+  insightface_models:

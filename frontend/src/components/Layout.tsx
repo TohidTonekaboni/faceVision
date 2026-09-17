@@ -11,6 +11,7 @@ import { Avatar, IconButton, Tooltip } from "@mui/material";
 import { apiClient } from "../api/client";
 import { useAuthStore } from "../store/authStore";
 import { useSnapshotSessionStore } from "../store/snapshotSessionStore";
+import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
 import { useLocale } from "../i18n/LocaleContext";
 import { LanguageToggle } from "./LanguageToggle";
 
@@ -41,6 +42,13 @@ export function Layout() {
   const sessionCameraIds = useSnapshotSessionStore((state) => state.cameraIds);
   const stopSession = useSnapshotSessionStore((state) => state.stop);
 
+  // Same rationale as the snapshot session above: surfacing this here (and
+  // mounting the runner that keeps it alive) means a live inference session
+  // keeps running, and stays visible/stoppable, from any page.
+  const isInferenceRunning = useLiveInferenceSessionStore((state) => state.isRunning);
+  const inferenceCameraIds = useLiveInferenceSessionStore((state) => state.cameraIds);
+  const stopInferenceSession = useLiveInferenceSessionStore((state) => state.stop);
+
   return (
     <div className="flex h-screen bg-canvas text-ink font-display">
       <aside className={`w-64 shrink-0 bg-surface flex flex-col ${direction === "rtl" ? "border-l" : "border-r"} border-border`}>
@@ -63,6 +71,20 @@ export function Layout() {
             </span>
             <Tooltip title={t("stopSnapshot")}>
               <IconButton size="small" onClick={stopSession} aria-label={t("stopSnapshot")}>
+                <StopRoundedIcon fontSize="small" sx={{ color: "inherit" }} />
+              </IconButton>
+            </Tooltip>
+          </div>
+        )}
+
+        {isInferenceRunning && (
+          <div className="mx-3 mt-3 flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary">
+            <span className="live-dot" />
+            <span className="flex-1 truncate">
+              {t("inferenceSessionRunning", { count: String(inferenceCameraIds.length) })}
+            </span>
+            <Tooltip title={t("stopLiveInference")}>
+              <IconButton size="small" onClick={stopInferenceSession} aria-label={t("stopLiveInference")}>
                 <StopRoundedIcon fontSize="small" sx={{ color: "inherit" }} />
               </IconButton>
             </Tooltip>
