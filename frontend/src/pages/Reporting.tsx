@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   FormControlLabel,
+  Pagination,
   TextField,
 } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
@@ -20,6 +21,8 @@ import { CameraTimelineChart } from "../components/CameraTimelineChart";
 
 const toGregorianIso = (value: dayjs.Dayjs | null) => (value ? value.calendar("gregory").format("YYYY-MM-DD") : "");
 
+const EVENTS_PAGE_SIZE = 20;
+
 export default function Reporting() {
   const { locale, t } = useLocale();
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -29,6 +32,13 @@ export default function Reporting() {
     dayjs.locale(locale === "fa" ? "fa" : "en");
   }, [locale]);
 
+  // JS's Date.getTimezoneOffset() convention (minutes to ADD to local time to
+  // reach UTC) — lets the backend treat dateFrom/dateTo/timelineDate as the
+  // viewer's local calendar day rather than a UTC day, so a 9:47am local
+  // event is filtered into (and later rendered under) the right day and hour
+  // instead of shifting by the local/UTC offset.
+  const tzOffsetMinutes = useMemo(() => new Date().getTimezoneOffset(), []);
+
   const today = useMemo(() => dayjs().calendar("gregory").format("YYYY-MM-DD"), []);
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
@@ -36,6 +46,13 @@ export default function Reporting() {
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [selectedCameraIds, setSelectedCameraIds] = useState<string[]>([]);
   const [includeUnknown, setIncludeUnknown] = useState(false);
+  const [page, setPage] = useState(1);
+
+  // Any filter change can invalidate the current page (e.g. page 3 no longer
+  // exists once the result set shrinks), so start back over from page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [dateFrom, dateTo, selectedPersonIds, selectedCameraIds, includeUnknown]);
 
   const { data: people } = usePeople();
   const { data: cameras } = useCameras();
@@ -45,6 +62,9 @@ export default function Reporting() {
     personIds: selectedPersonIds.length ? selectedPersonIds : undefined,
     cameraIds: selectedCameraIds.length ? selectedCameraIds : undefined,
     includeUnknown,
+    tzOffsetMinutes,
+    page,
+    pageSize: EVENTS_PAGE_SIZE,
   });
   const { data: timelineEvents } = useDetectionEvents({
     dateFrom: timelineDate,
@@ -52,11 +72,13 @@ export default function Reporting() {
     personIds: selectedPersonIds.length ? selectedPersonIds : undefined,
     cameraIds: selectedCameraIds.length ? selectedCameraIds : undefined,
     includeUnknown,
+    tzOffsetMinutes,
     pageSize: 500,
   });
 
   const selectablePeople = (people ?? []).filter((p) => includeUnknown || !p.is_unknown);
   const selectedCameras = (cameras ?? []).filter((c) => selectedCameraIds.length === 0 || selectedCameraIds.includes(c.id));
+  const pageCount = eventsPage ? Math.max(Math.ceil(eventsPage.total / EVENTS_PAGE_SIZE), 1) : 1;
 
   const handleExport = () => {
     if (!accessToken) return;
@@ -67,6 +89,7 @@ export default function Reporting() {
         personIds: selectedPersonIds.length ? selectedPersonIds : undefined,
         cameraIds: selectedCameraIds.length ? selectedCameraIds : undefined,
         includeUnknown,
+        tzOffsetMinutes,
       },
       accessToken
     );
@@ -178,6 +201,11 @@ export default function Reporting() {
             <p className="text-sm text-inkDim px-4 py-6">{t("noEventsFound")}</p>
           )}
           {isLoading && <p className="text-sm text-inkDim px-4 py-6">{t("loadingEvents")}</p>}
+          {!isLoading && eventsPage && eventsPage.total > EVENTS_PAGE_SIZE && (
+            <div className="flex justify-center py-3 border-t border-border">
+              <Pagination count={pageCount} page={page} onChange={(_, value) => setPage(value)} size="small" />
+            </div>
+          )}
         </div>
       </div>
     </LocalizationProvider>

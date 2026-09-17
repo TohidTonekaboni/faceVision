@@ -124,6 +124,8 @@ const translations = {
     noTimelineData: "No detections for this person on this day.",
     person: "Person",
     camera: "Camera",
+    resetZoom: "Reset zoom",
+    dragToZoomHint: "Drag on the timeline to zoom in",
   },
   fa: {
     language: "زبان",
@@ -246,6 +248,8 @@ const translations = {
     noTimelineData: "برای این فرد در این روز موردی ثبت نشده است.",
     person: "فرد",
     camera: "دوربین",
+    resetZoom: "بازنشانی بزرگ‌نمایی",
+    dragToZoomHint: "برای بزرگ‌نمایی روی جدول زمانی بکشید",
   },
 } as const;
 

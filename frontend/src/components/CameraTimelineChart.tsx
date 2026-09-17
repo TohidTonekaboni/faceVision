@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "@mui/material";
 import type { Camera, DetectionEvent } from "../api/queries";
 import { useLocale } from "../i18n/LocaleContext";
@@ -6,7 +6,7 @@ import { useLocale } from "../i18n/LocaleContext";
 interface CameraTimelineChartProps {
   events: DetectionEvent[];
   cameras: Camera[];
-  dateIso: string; // Gregorian YYYY-MM-DD, the day being visualized (UTC day, matches the events query)
+  dateIso: string; // Local calendar date (YYYY-MM-DD) being visualized
 }
 
 // Validated 8-hue categorical order (see dataviz skill reference palette) —
@@ -25,9 +25,18 @@ const UNKNOWN_COLOR = "#94a3b8"; // muted gray — deliberately not a categorica
 const MAX_COLORED_PEOPLE = CATEGORICAL_PALETTE.length;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const LANE_HEIGHT = 16;
 const LANE_GAP = 3;
+const MIN_ZOOM_MS = 5 * 60 * 1000; // dragging to a sliver smaller than this is treated as a click, not a zoom
+const MIN_DRAG_PX = 6;
+
+// Candidate gridline spacings, in minutes, from finest to coarsest. Whichever
+// is the smallest step that still keeps the visible window under ~10 ticks
+// is used — so zooming in from a full day down to a 20-minute window
+// gradually swaps hour ticks for 5- or 1-minute ticks instead of either
+// cluttering the axis or showing just one or two labels.
+const NICE_STEP_MINUTES = [1, 2, 5, 10, 15, 30, 60, 120, 180, 240, 360, 720, 1440];
+const TARGET_TICK_COUNT = 8;
 
 interface Segment {
   event: DetectionEvent;
@@ -59,8 +68,53 @@ function assignLanes(events: DetectionEvent[]): Map<string, number> {
 export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimelineChartProps) {
   const { t, locale } = useLocale();
   const [crosshair, setCrosshair] = useState<{ leftPct: number; label: string } | null>(null);
+  const [drag, setDrag] = useState<{ startFrac: number; endFrac: number } | null>(null);
 
-  const dayStart = useMemo(() => Date.parse(`${dateIso}T00:00:00Z`), [dateIso]);
+  // Parsed without a "Z" suffix, so the JS runtime treats it as local
+  // midnight — matching the viewer's own wall clock, which is what the hour
+  // axis and event positions need to agree on. Using UTC midnight here (as
+  // this chart previously did) is what caused events to render under the
+  // wrong hour for any viewer not in UTC: a 9:47am local event is a
+  // different instant than 9:47am UTC, so positioning by UTC-day-fraction
+  // shows it under whatever hour it happens to be in UTC instead.
+  const dayStart = useMemo(() => new Date(`${dateIso}T00:00:00`).getTime(), [dateIso]);
+  const dayEnd = dayStart + DAY_MS;
+
+  const [viewRange, setViewRange] = useState<[number, number]>([dayStart, dayEnd]);
+  // A newly selected day should always open fully zoomed out, not carry over
+  // whatever window a previous day was left zoomed into.
+  useEffect(() => {
+    setViewRange([dayStart, dayEnd]);
+  }, [dayStart, dayEnd]);
+
+  const [viewStart, viewEnd] = viewRange;
+  const viewDuration = viewEnd - viewStart;
+  const isZoomed = viewStart > dayStart || viewEnd < dayEnd;
+
+  // Minutes to ADD to local time to reach UTC (JS Date.getTimezoneOffset()
+  // convention). Tick boundaries are computed in this shifted space so that,
+  // e.g., "round to the nearest hour" means the nearest local hour rather
+  // than the nearest UTC hour — they can differ by any number of minutes,
+  // not just whole hours (many real zones sit at a half-hour offset).
+  const tzOffsetMs = useMemo(() => new Date().getTimezoneOffset() * 60000, []);
+  const toLocalSpace = (ms: number) => ms - tzOffsetMs;
+  const toRealSpace = (localMs: number) => localMs + tzOffsetMs;
+
+  const ticks = useMemo(() => {
+    const stepMinutes =
+      NICE_STEP_MINUTES.find((step) => viewDuration / (step * 60000) <= TARGET_TICK_COUNT) ??
+      NICE_STEP_MINUTES[NICE_STEP_MINUTES.length - 1];
+    const stepMs = stepMinutes * 60000;
+    const firstLocal = Math.ceil(toLocalSpace(viewStart) / stepMs) * stepMs;
+    const result: number[] = [];
+    for (let localMs = firstLocal; toRealSpace(localMs) <= viewEnd; localMs += stepMs) {
+      result.push(toRealSpace(localMs));
+    }
+    return result;
+  }, [viewStart, viewEnd, viewDuration, tzOffsetMs]);
+
+  const formatClock = (ms: number) =>
+    new Date(ms).toLocaleTimeString(locale === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" });
 
   const colorByPersonId = useMemo(() => {
     const totals = new Map<string, { name: string; count: number; isUnknown: boolean }>();
@@ -128,15 +182,45 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString(locale === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" });
 
-  const handlePointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const fractionFromEvent = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const fraction = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-    const timeAtCursor = new Date(dayStart + fraction * DAY_MS);
-    setCrosshair({
-      leftPct: fraction * 100,
-      label: timeAtCursor.toLocaleTimeString(locale === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
-    });
+    return Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
   };
+
+  const handlePointerDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const fraction = fractionFromEvent(e);
+    setDrag({ startFrac: fraction, endFrac: fraction });
+  };
+
+  const handlePointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const fraction = fractionFromEvent(e);
+    if (drag) {
+      setDrag({ startFrac: drag.startFrac, endFrac: fraction });
+      return;
+    }
+    setCrosshair({ leftPct: fraction * 100, label: formatClock(viewStart + fraction * viewDuration) });
+  };
+
+  const finishDrag = () => {
+    if (!drag) return;
+    const rect = { startFrac: Math.min(drag.startFrac, drag.endFrac), endFrac: Math.max(drag.startFrac, drag.endFrac) };
+    setDrag(null);
+    const pxWidth = (rect.endFrac - rect.startFrac) * (document.getElementById(TRACK_WIDTH_PROBE_ID)?.clientWidth ?? 0);
+    if (pxWidth < MIN_DRAG_PX) return; // treat as a click, not a zoom gesture
+
+    const newStart = viewStart + rect.startFrac * viewDuration;
+    const newEnd = viewStart + rect.endFrac * viewDuration;
+    if (newEnd - newStart < MIN_ZOOM_MS) return;
+    setViewRange([newStart, newEnd]);
+  };
+
+  const handlePointerUp = () => finishDrag();
+  const handlePointerLeave = () => {
+    setCrosshair(null);
+    finishDrag();
+  };
+
+  const resetZoom = () => setViewRange([dayStart, dayEnd]);
 
   if (cameraRows.length === 0) {
     return <p className="text-sm text-inkDim px-1 py-6">{t("noTimelineData")}</p>;
@@ -144,23 +228,38 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      {legend.length >= 2 && (
-        <div className="flex flex-wrap gap-3 mb-3">
-          {legend.map(([label, color]) => (
-            <div key={label} className="flex items-center gap-1.5 text-xs text-inkDim">
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-              {label}
-            </div>
+      <div className="flex items-center justify-between mb-3 gap-3">
+        {legend.length >= 2 ? (
+          <div className="flex flex-wrap gap-3">
+            {legend.map(([label, color]) => (
+              <div key={label} className="flex items-center gap-1.5 text-xs text-inkDim">
+                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[11px] text-inkDim">{t("dragToZoomHint")}</span>
+        )}
+        {isZoomed && (
+          <button onClick={resetZoom} className="text-xs font-medium text-primary hover:underline shrink-0">
+            {t("resetZoom")}
+          </button>
+        )}
+      </div>
+
+      <div className="flex text-[10px] text-inkDim px-[1px] mb-1" style={{ marginInlineStart: 112 + 12 }}>
+        <div id={TRACK_WIDTH_PROBE_ID} className="relative flex-1 h-3">
+          {ticks.map((tickMs) => (
+            <span
+              key={tickMs}
+              className="absolute -translate-x-1/2"
+              style={{ left: `${((tickMs - viewStart) / viewDuration) * 100}%` }}
+            >
+              {formatClock(tickMs)}
+            </span>
           ))}
         </div>
-      )}
-
-      <div className="flex text-[10px] text-inkDim px-[1px] mb-1" style={{ marginInlineStart: 112 }}>
-        {HOURS.map((h) => (
-          <div key={h} className="flex-1 text-center">
-            {h}
-          </div>
-        ))}
       </div>
 
       <div className="space-y-2">
@@ -173,25 +272,34 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
             <div key={cameraName} className="flex items-center gap-3">
               <div className="w-28 shrink-0 text-xs font-medium truncate">{cameraName}</div>
               <div
-                className="relative flex-1 rounded bg-subtle overflow-hidden cursor-crosshair"
+                className="relative flex-1 rounded bg-subtle overflow-hidden cursor-crosshair select-none"
                 style={{ height: rowHeight }}
+                onMouseDown={handlePointerDown}
                 onMouseMove={handlePointerMove}
-                onMouseLeave={() => setCrosshair(null)}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerLeave}
               >
-                {/* hourly gridlines — hairline, recessive */}
-                {HOURS.map((h) => (
+                {ticks.map((tickMs) => (
                   <div
-                    key={h}
+                    key={tickMs}
                     className="absolute top-0 bottom-0 border-border"
-                    style={{ left: `${(h / 24) * 100}%`, borderInlineStartWidth: 1, borderStyle: "solid", opacity: 0.5 }}
+                    style={{
+                      left: `${((tickMs - viewStart) / viewDuration) * 100}%`,
+                      borderInlineStartWidth: 1,
+                      borderStyle: "solid",
+                      opacity: 0.5,
+                    }}
                   />
                 ))}
 
                 {rowData?.segments.map(({ event, lane, color, seriesLabel }) => {
                   const startedAt = new Date(event.started_at).getTime();
                   const endedAt = new Date(event.ended_at).getTime();
-                  const left = Math.max(((startedAt - dayStart) / DAY_MS) * 100, 0);
-                  const width = Math.min(Math.max(((endedAt - startedAt) / DAY_MS) * 100, 0.4), 100 - left);
+                  const rawLeft = ((startedAt - viewStart) / viewDuration) * 100;
+                  const rawRight = ((endedAt - viewStart) / viewDuration) * 100;
+                  if (rawRight <= 0 || rawLeft >= 100) return null; // entirely outside the current zoom window
+                  const left = Math.max(rawLeft, 0);
+                  const width = Math.min(Math.max(rawRight - left, 0.4), 100 - left);
                   return (
                     <Tooltip
                       key={event.id}
@@ -211,7 +319,17 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
                   );
                 })}
 
-                {crosshair && (
+                {drag && (
+                  <div
+                    className="absolute top-0 bottom-0 bg-primary/20 border-x border-primary pointer-events-none"
+                    style={{
+                      left: `${Math.min(drag.startFrac, drag.endFrac) * 100}%`,
+                      width: `${Math.abs(drag.endFrac - drag.startFrac) * 100}%`,
+                    }}
+                  />
+                )}
+
+                {!drag && crosshair && (
                   <div
                     className="absolute top-0 bottom-0 w-px bg-ink/30 pointer-events-none"
                     style={{ left: `${crosshair.leftPct}%` }}
@@ -223,7 +341,7 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
         })}
       </div>
 
-      {crosshair && (
+      {!drag && crosshair && (
         <p className="text-[10px] text-inkDim text-right mt-1" dir="ltr">
           {crosshair.label}
         </p>
@@ -231,3 +349,10 @@ export function CameraTimelineChart({ events, cameras, dateIso }: CameraTimeline
     </div>
   );
 }
+
+// Any one row's track div works as the shared width reference, since every
+// row's track spans the same horizontal region (same fixed-width label
+// column + gap precede all of them) — this id is placed on the tick-label
+// strip above the rows purely to have a stable, always-mounted element to
+// measure pixel width from when deciding if a drag was a real zoom gesture.
+const TRACK_WIDTH_PROBE_ID = "camera-timeline-track-width-probe";

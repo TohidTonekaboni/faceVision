@@ -19,11 +19,23 @@ router = APIRouter(prefix="/api/reporting", tags=["reporting"], dependencies=[De
 MAX_EXPORT_ROWS = 50_000
 
 
-def _date_range_bounds(date_from: date, date_to: date) -> tuple[datetime, datetime]:
+def _date_range_bounds(date_from: date, date_to: date, tz_offset_minutes: int = 0) -> tuple[datetime, datetime]:
     """A detection_events row overlaps [date_from, date_to] (inclusive) if it
-    started before the range ends and ended on/after the range starts."""
-    range_start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
-    range_end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    started before the range ends and ended on/after the range starts.
+
+    date_from/date_to are calendar dates in the caller's local time zone (the
+    date a browser date picker shows), not UTC — tz_offset_minutes (following
+    JS's Date.getTimezoneOffset() convention: minutes to ADD to local time to
+    reach UTC) shifts the UTC bounds so "today" means the caller's local
+    today, not whatever day UTC happens to be at the boundaries. Without
+    this, a viewer ahead of UTC sees events time-shifted by their offset
+    (e.g. a 9:47am local event lands under an earlier hour), and events in
+    the local day's first few hours can be dropped entirely because they
+    fall in the previous UTC day."""
+    range_start = datetime.combine(date_from, time.min, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+    range_end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc) + timedelta(
+        minutes=tz_offset_minutes
+    )
     return range_start, range_end
 
 
@@ -33,8 +45,9 @@ def _base_query(
     person_ids: list[str] | None,
     camera_ids: list[str] | None,
     include_unknown: bool,
+    tz_offset_minutes: int = 0,
 ) -> Select:
-    range_start, range_end = _date_range_bounds(date_from, date_to)
+    range_start, range_end = _date_range_bounds(date_from, date_to, tz_offset_minutes)
 
     query = (
         select(
@@ -74,11 +87,12 @@ async def list_events(
     person_ids: list[str] | None = Query(default=None),
     camera_ids: list[str] | None = Query(default=None),
     include_unknown: bool = Query(default=False),
+    tz_offset_minutes: int = Query(default=0),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    query = _base_query(date_from, date_to, person_ids, camera_ids, include_unknown)
+    query = _base_query(date_from, date_to, person_ids, camera_ids, include_unknown, tz_offset_minutes)
 
     total = await db.scalar(select(func.count()).select_from(query.subquery()))
 
@@ -138,9 +152,10 @@ async def export_events_csv(
     person_ids: list[str] | None = Query(default=None),
     camera_ids: list[str] | None = Query(default=None),
     include_unknown: bool = Query(default=False),
+    tz_offset_minutes: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
 ):
-    query = _base_query(date_from, date_to, person_ids, camera_ids, include_unknown)
+    query = _base_query(date_from, date_to, person_ids, camera_ids, include_unknown, tz_offset_minutes)
     query = query.order_by(DetectionEvent.started_at.desc()).limit(MAX_EXPORT_ROWS)
     rows = (await db.execute(query)).all()
 

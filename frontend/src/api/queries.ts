@@ -398,6 +398,10 @@ export interface DetectionEventFilters {
   personIds?: string[];
   cameraIds?: string[];
   includeUnknown?: boolean;
+  /** JS Date.getTimezoneOffset() convention (minutes to ADD to local time to
+   * reach UTC) — lets the backend interpret dateFrom/dateTo as the caller's
+   * local calendar day instead of a UTC day. */
+  tzOffsetMinutes?: number;
   page?: number;
   pageSize?: number;
 }
@@ -409,6 +413,7 @@ function toEventQueryParams(filters: DetectionEventFilters) {
     person_ids: filters.personIds,
     camera_ids: filters.cameraIds,
     include_unknown: filters.includeUnknown,
+    tz_offset_minutes: filters.tzOffsetMinutes,
     page: filters.page,
     page_size: filters.pageSize,
   };
@@ -457,6 +462,7 @@ export function buildEventsExportUrl(filters: DetectionEventFilters, accessToken
   (filters.personIds ?? []).forEach((id) => params.append("person_ids", id));
   (filters.cameraIds ?? []).forEach((id) => params.append("camera_ids", id));
   if (filters.includeUnknown) params.set("include_unknown", "true");
+  if (filters.tzOffsetMinutes !== undefined) params.set("tz_offset_minutes", String(filters.tzOffsetMinutes));
   params.set("token", accessToken);
   return `${API_BASE_URL}/api/reporting/events/export.csv?${params.toString()}`;
 }
