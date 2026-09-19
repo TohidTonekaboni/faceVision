@@ -1,18 +1,14 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Popover from "@mui/material/Popover";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import NotificationsNoneRoundedIcon from "@mui/icons-material/NotificationsNoneRounded";
-import { useAppStore, type Role } from "../../store/appStore";
+import { useAppStore } from "../../store/appStore";
 import { t, formatDigits } from "../../i18n";
 import { crumbFor } from "./navConfig";
-import { CAMERAS } from "../../data/cameras";
+import { useCameras } from "../../hooks/useCameras";
 import { useNotifications } from "../../hooks/useDashboard";
 import { ImageSlot } from "../common/ImageSlot";
-
-const ROLES: Role[] = ["super_admin", "level_1", "level_2", "level_3"];
 
 export function Topbar() {
   const navigate = useNavigate();
@@ -21,16 +17,15 @@ export function Topbar() {
   const setLang = useAppStore((s) => s.setLang);
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
-  const role = useAppStore((s) => s.role);
-  const setRole = useAppStore((s) => s.setRole);
   const dict = t(lang);
   const fa = lang === "fa";
 
   const [searchAnchor, setSearchAnchor] = useState<HTMLDivElement | null>(null);
   const [notifAnchor, setNotifAnchor] = useState<HTMLButtonElement | null>(null);
   const { data: notifs = [] } = useNotifications();
+  const { data: cams = [] } = useCameras();
 
-  const searchCams = CAMERAS.slice(0, 3);
+  const searchCams = cams.slice(0, 3);
 
   return (
     <header className="h-[60px] flex-none flex items-center gap-4 px-5 bg-panel border-b border-line relative z-[5]">
@@ -70,57 +65,16 @@ export function Topbar() {
             >
               <span
                 className="w-[7px] h-[7px] rounded-full flex-none"
-                style={{ background: c.status === "online" ? "#14B8A6" : c.status === "degraded" ? "#F59E0B" : "#64748B" }}
+                style={{ background: c.status === "online" ? "#14B8A6" : "#64748B" }}
               />
-              <span className="flex-1">{fa ? c.nameFa : c.name}</span>
-              <span className="text-[11px] text-faint">{fa ? c.zoneFa : c.zone}</span>
-            </div>
-          ))}
-          <div className="px-[13px] py-[9px] text-[9.5px] font-mono uppercase text-faint bg-panel2" style={{ letterSpacing: ".14em" }}>
-            {dict.people}
-          </div>
-          {[
-            { name: fa ? "علی رضایی" : "Ali Rezaei", count: "412" },
-            { name: fa ? "مریم کریمی" : "Maryam Karimi", count: "388" },
-          ].map((p) => (
-            <div
-              key={p.name}
-              onClick={() => {
-                setSearchAnchor(null);
-                navigate("/reporting");
-              }}
-              className="px-[13px] py-[9px] flex items-center gap-2.5 text-[12.5px] text-txt cursor-pointer"
-            >
-              <span className="w-5 h-5 rounded-full bg-panel2 border border-line" />
-              <span className="flex-1">{p.name}</span>
-              <span className="text-[11px] font-mono text-faint">{p.count}</span>
+              <span className="flex-1">{c.name}</span>
+              <span className="text-[11px] text-faint">{c.zone}</span>
             </div>
           ))}
         </Popover>
       </div>
 
       <div className="flex items-center gap-2">
-        <Select
-          size="small"
-          value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
-          title={dict.role}
-          sx={{
-            fontSize: 11.5,
-            height: 34,
-            borderRadius: "9px",
-            color: "var(--fv-dim)",
-            bgcolor: "var(--fv-panel2)",
-            "& .MuiOutlinedInput-notchedOutline": { borderColor: "var(--fv-line)" },
-          }}
-        >
-          {ROLES.map((r) => (
-            <MenuItem key={r} value={r} sx={{ fontSize: 12.5 }}>
-              {r}
-            </MenuItem>
-          ))}
-        </Select>
-
         <div className="flex p-[2px] rounded-[9px] border border-line bg-panel2">
           <button
             onClick={() => setLang("en")}
@@ -172,17 +126,18 @@ export function Topbar() {
               <span className="text-[10px] font-mono text-faint">{dict.notif_src}</span>
             </div>
             {notifs.map((n) => (
-              <div key={n.slot} className="px-3.5 py-[11px] flex gap-[11px] items-center border-b border-line">
+              <div key={n.id} className="px-3.5 py-[11px] flex gap-[11px] items-center border-b border-line">
                 <div className="w-[30px] h-[30px] rounded-lg overflow-hidden flex-none border border-line">
-                  <ImageSlot id={n.slot} shape="rounded" radius={8} placeholder="face" />
+                  <ImageSlot id={`fv-notif-${n.id}`} shape="rounded" radius={8} placeholder="face" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] text-txt font-medium">{fa ? n.personFa : n.person}</div>
-                  <div className="text-[11px] text-dim overflow-hidden text-ellipsis whitespace-nowrap">{fa ? n.cameraFa : n.camera}</div>
+                  <div className="text-[12.5px] text-txt font-medium">{n.isUnknown ? dict.unknown_tag : n.personName}</div>
+                  <div className="text-[11px] text-dim overflow-hidden text-ellipsis whitespace-nowrap">{n.cameraName}</div>
                 </div>
-                <div className="text-[10.5px] font-mono text-faint">{n.ago}</div>
+                <div className="text-[10.5px] font-mono text-faint">{formatDigits(lang, n.ago)}</div>
               </div>
             ))}
+            {notifs.length === 0 && <div className="px-3.5 py-4 text-[12px] text-faint text-center">{dict.no_data}</div>}
             <button
               onClick={() => {
                 setNotifAnchor(null);

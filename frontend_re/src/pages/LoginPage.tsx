@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Alert } from "@mui/material";
 import { useAppStore } from "../store/appStore";
+import { useAuthStore } from "../store/authStore";
+import { apiClient } from "../api/client";
 import { t, formatDigits } from "../i18n";
 
 export function LoginPage() {
@@ -12,14 +15,37 @@ export function LoginPage() {
   const login = useAppStore((s) => s.login);
   const dict = t(lang);
 
-  const [username, setUsername] = useState("operator.nasiri");
-  const [password, setPassword] = useState("············");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    login();
-    navigate("/dashboard");
+    setError(null);
+    setLoading(true);
+    try {
+      const form = new URLSearchParams();
+      form.set("username", username);
+      form.set("password", password);
+      const { data } = await apiClient.post("/api/auth/login", form, {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
+      useAuthStore.getState().setTokens(data.access_token, data.refresh_token);
+      const me = await apiClient.get("/api/auth/me");
+      useAuthStore.getState().setUser(me.data);
+      login(me.data);
+      navigate("/dashboard");
+    } catch (err: unknown) {
+      const detail =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setError(detail || dict.login_failed);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -97,11 +123,14 @@ export function LoginPage() {
           </div>
 
           <div className="flex flex-col gap-3.5">
+            {error && <Alert severity="error">{error}</Alert>}
             <label className="flex flex-col gap-[7px]">
               <span className="text-[12px] text-dim">{dict.username}</span>
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                required
                 className="px-[13px] py-[11px] rounded-[10px] text-[13px] outline-none bg-panel2 text-txt"
                 style={{ border: "1px solid var(--fv-line)" }}
               />
@@ -112,6 +141,7 @@ export function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                required
                 className="px-[13px] py-[11px] rounded-[10px] text-[13px] outline-none bg-panel2 text-txt"
                 style={{ border: "1px solid var(--fv-line)" }}
               />
@@ -127,10 +157,11 @@ export function LoginPage() {
             </div>
             <button
               type="submit"
+              disabled={loading}
               className="mt-1 p-3 rounded-[10px] border-none text-white text-[13px] font-semibold cursor-pointer"
-              style={{ background: "#6366F1", boxShadow: "0 6px 18px -6px rgba(99,102,241,.7)" }}
+              style={{ background: "#6366F1", boxShadow: "0 6px 18px -6px rgba(99,102,241,.7)", opacity: loading ? 0.7 : 1 }}
             >
-              {dict.signin}
+              {loading ? dict.signing_in : dict.signin}
             </button>
           </div>
 

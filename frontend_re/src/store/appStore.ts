@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Lang } from "../i18n";
+import type { CurrentUser, Role } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 
 export type Theme = "dark" | "light";
-export type Role = "super_admin" | "level_1" | "level_2" | "level_3";
+export type { Role };
 
 interface AppState {
   theme: Theme;
@@ -14,9 +16,12 @@ interface AppState {
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   setLang: (lang: Lang) => void;
-  setRole: (role: Role) => void;
   setLastCameraId: (id: string) => void;
-  login: () => void;
+  /** Called after a real login (POST /api/auth/login + GET /api/auth/me)
+   * succeeds — role is mirrored from the authenticated user rather than set
+   * independently, so existing role-gated nav/routes (RequireRole,
+   * navConfig) keep working unchanged. */
+  login: (user: CurrentUser) => void;
   logout: () => void;
 }
 
@@ -25,16 +30,18 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       theme: "dark",
       lang: "en",
-      role: "super_admin",
+      role: "level_1",
       authenticated: false,
-      lastCameraId: "c1",
+      lastCameraId: "",
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
       setLang: (lang) => set({ lang }),
-      setRole: (role) => set({ role }),
       setLastCameraId: (id) => set({ lastCameraId: id }),
-      login: () => set({ authenticated: true }),
-      logout: () => set({ authenticated: false }),
+      login: (user) => set({ authenticated: true, role: user.role }),
+      logout: () => {
+        useAuthStore.getState().logout();
+        set({ authenticated: false });
+      },
     }),
     { name: "facevision-app" },
   ),

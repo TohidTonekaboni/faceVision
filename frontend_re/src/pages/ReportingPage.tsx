@@ -1,30 +1,39 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store/appStore";
+import { useAuthStore } from "../store/authStore";
 import { t, formatDigits } from "../i18n";
 import { Panel } from "../components/common/Panel";
-import { CAMERAS, cameraById } from "../data/cameras";
-import { PEOPLE, personById } from "../data/people";
-import { DEFAULT_REPORT_FILTERS, REPORT_DAYS, type ReportFilters } from "../data/reportEngine";
+import { defaultReportFilters, type ReportFilters } from "../data/reportEngine";
 import { useReportData } from "../hooks/useReportData";
+import { buildEventsExportUrl } from "../api/queries";
+import { colorForId } from "../utils/palette";
 
 const ZOOM = [100, 150, 220, 320, 450];
 const PAGE_SIZE = 8;
+const MIN_DATE = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() - 90);
+  return d.toISOString().slice(0, 10);
+})();
+const MAX_DATE = new Date().toISOString().slice(0, 10);
 
 export function ReportingPage() {
   const lang = useAppStore((s) => s.lang);
   const theme = useAppStore((s) => s.theme);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const dict = t(lang);
   const fa = lang === "fa";
   const fd = (v: string | number) => formatDigits(lang, v);
   const num = (n: number) => fd(n.toLocaleString("en-US"));
   const shortDate = (d: string) => fd(d.slice(5).replace("-", "/"));
+  const personLabel = (p: { display_name: string; is_unknown: boolean }) => (p.is_unknown ? dict.unknown_tag : p.display_name);
 
-  const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS);
+  const [filters, setFilters] = useState<ReportFilters>(defaultReportFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [zoomIdx, setZoomIdx] = useState(0);
 
-  const { data } = useReportData(filters, lang);
+  const { data, people, cameras, isLoading, isError } = useReportData(filters, lang);
   const summary = data?.summary ?? { matched: [], totalEvents: 0, distinctPeople: [], camsUsed: [] };
   const timeline = data?.timeline ?? { day: filters.to, lanes: [], empty: true };
 
@@ -38,12 +47,16 @@ export function ReportingPage() {
   };
 
   const presetGo = (days: number) => {
-    const to = REPORT_DAYS[REPORT_DAYS.length - 1];
-    const from = REPORT_DAYS[Math.max(0, REPORT_DAYS.length - days)];
-    patchFilters({ from, to });
+    const to = MAX_DATE;
+    const from = new Date();
+    from.setDate(from.getDate() - (days - 1));
+    patchFilters({ from: from.toISOString().slice(0, 10), to });
   };
-  const activePreset = (days: number) =>
-    filters.to === REPORT_DAYS[REPORT_DAYS.length - 1] && filters.from === REPORT_DAYS[Math.max(0, REPORT_DAYS.length - days)];
+  const activePreset = (days: number) => {
+    const from = new Date();
+    from.setDate(from.getDate() - (days - 1));
+    return filters.to === MAX_DATE && filters.from === from.toISOString().slice(0, 10);
+  };
 
   const pageCount = Math.max(1, Math.ceil(summary.matched.length / PAGE_SIZE));
   const clampedPage = Math.min(page, pageCount);
@@ -63,7 +76,21 @@ export function ReportingPage() {
     fontWeight: on ? 500 : 400,
   });
 
-  const legend = PEOPLE.filter((p) => filters.people.length === 0 || filters.people.includes(p.id)).filter((p) => filters.unknown || p.id !== "p0");
+  const legend = people
+    .filter((p) => filters.people.length === 0 || filters.people.includes(p.id))
+    .filter((p) => filters.unknown || !p.is_unknown);
+
+  const exportUrl = accessToken ? buildEventsExportUrl(
+    {
+      dateFrom: filters.from,
+      dateTo: filters.to,
+      personIds: filters.people.length ? filters.people : undefined,
+      cameraIds: filters.cams.length ? filters.cams : undefined,
+      includeUnknown: filters.unknown,
+      tzOffsetMinutes: new Date().getTimezoneOffset(),
+    },
+    accessToken,
+  ) : undefined;
 
   return (
     <div className="flex flex-col gap-4 max-w-[1420px]">
@@ -72,10 +99,16 @@ export function ReportingPage() {
           <div className="text-[22px] font-semibold text-txt">{dict.rep_title}</div>
           <div className="text-[12.5px] text-dim mt-1">{dict.rep_sub}</div>
         </div>
-        <button className="px-[13px] py-2 rounded-[9px] text-[12px] text-dim cursor-pointer bg-panel" style={{ border: "1px solid var(--fv-line)" }}>
+        <a
+          href={exportUrl}
+          className="px-[13px] py-2 rounded-[9px] text-[12px] text-dim cursor-pointer bg-panel no-underline"
+          style={{ border: "1px solid var(--fv-line)", pointerEvents: exportUrl ? "auto" : "none", opacity: exportUrl ? 1 : 0.5 }}
+        >
           {dict.export_csv}
-        </button>
+        </a>
       </div>
+
+      {isError && <div className="px-4 py-3 rounded-lg text-[12.5px] text-rose" style={{ border: "1px solid rgba(244,63,94,.3)" }}>{dict.error_generic}</div>}
 
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(176px,1fr))" }}>
         <Panel className="p-[15px]" style={{ padding: "14px 15px" }}>
@@ -94,9 +127,6 @@ export function ReportingPage() {
           <div className="mt-[9px] font-semibold font-mono text-txt text-[22px]" style={{ lineHeight: 1.2 }}>
             {num(summary.distinctPeople.length)}
           </div>
-          <div className="mt-[3px] text-[11px] text-dim">
-            {summary.distinctPeople.includes("p0") ? (fa ? "شامل ناشناس" : "includes unrecognised") : fa ? "همه شناخته‌شده" : "all recognised"}
-          </div>
         </Panel>
         <Panel className="p-[15px]" style={{ padding: "14px 15px" }}>
           <div className="text-[10px] uppercase font-mono text-faint" style={{ letterSpacing: ".12em" }}>
@@ -105,7 +135,6 @@ export function ReportingPage() {
           <div className="mt-[9px] font-semibold font-mono text-txt text-[22px]" style={{ lineHeight: 1.2 }}>
             {num(summary.camsUsed.length)}
           </div>
-          <div className="mt-[3px] text-[11px] text-dim">{fa ? "از ۱۲ دوربین" : "of 12 configured"}</div>
         </Panel>
         <Panel className="p-[15px]" style={{ padding: "14px 15px" }}>
           <div className="text-[10px] uppercase font-mono text-faint" style={{ letterSpacing: ".12em" }}>
@@ -114,7 +143,6 @@ export function ReportingPage() {
           <div className="mt-[9px] font-semibold font-mono text-txt text-[17px]" style={{ lineHeight: 1.2 }}>
             {shortDate(filters.from)}–{shortDate(filters.to)}
           </div>
-          <div className="mt-[3px] text-[11px] text-dim">{fa ? "تقویم جلالی" : "Jalali-aware"}</div>
         </Panel>
       </div>
 
@@ -136,9 +164,9 @@ export function ReportingPage() {
                     <input
                       type="date"
                       value={filters.from}
-                      min={REPORT_DAYS[0]}
-                      max={REPORT_DAYS[REPORT_DAYS.length - 1]}
-                      onChange={(e) => patchFilters({ from: e.target.value > filters.to ? filters.to : e.target.value })}
+                      min={MIN_DATE}
+                      max={filters.to}
+                      onChange={(e) => patchFilters({ from: e.target.value })}
                       className="flex-1 min-w-0 px-[11px] py-[9px] rounded-[9px] text-[12px] font-mono outline-none bg-panel2 text-txt"
                       style={{ border: "1px solid var(--fv-line)", colorScheme: theme }}
                     />
@@ -146,9 +174,9 @@ export function ReportingPage() {
                     <input
                       type="date"
                       value={filters.to}
-                      min={REPORT_DAYS[0]}
-                      max={REPORT_DAYS[REPORT_DAYS.length - 1]}
-                      onChange={(e) => patchFilters({ to: e.target.value < filters.from ? filters.from : e.target.value })}
+                      min={filters.from}
+                      max={MAX_DATE}
+                      onChange={(e) => patchFilters({ to: e.target.value })}
                       className="flex-1 min-w-0 px-[11px] py-[9px] rounded-[9px] text-[12px] font-mono outline-none bg-panel2 text-txt"
                       style={{ border: "1px solid var(--fv-line)", colorScheme: theme }}
                     />
@@ -187,17 +215,18 @@ export function ReportingPage() {
                     </button>
                   </div>
                   <div className="flex items-start gap-1.5 px-[9px] py-2 rounded-[9px] flex-wrap bg-panel2" style={{ border: "1px solid var(--fv-line)", minHeight: 38 }}>
-                    {PEOPLE.map((p) => {
+                    {people.map((p) => {
                       const on = filters.people.includes(p.id);
+                      const color = colorForId(p.id, p.is_unknown);
                       return (
                         <button
                           key={p.id}
                           onClick={() => toggleIn("people", p.id)}
                           className="inline-flex items-center gap-1.5 px-[9px] py-1 rounded-md cursor-pointer text-[11.5px]"
-                          style={chipStyle(on, p.color)}
+                          style={chipStyle(on, color)}
                         >
-                          <span className="w-2 h-2 rounded-[2px] flex-none" style={{ background: on ? "rgba(4,7,14,.45)" : p.color }} />
-                          {fa ? p.nameFa : p.name}
+                          <span className="w-2 h-2 rounded-[2px] flex-none" style={{ background: on ? "rgba(4,7,14,.45)" : color }} />
+                          {personLabel(p)}
                         </button>
                       );
                     })}
@@ -216,14 +245,14 @@ export function ReportingPage() {
                     </button>
                   </div>
                   <div className="flex items-start gap-1.5 px-[9px] py-2 rounded-[9px] flex-wrap bg-panel2" style={{ border: "1px solid var(--fv-line)", minHeight: 38 }}>
-                    {CAMERAS.map((c) => (
+                    {cameras.map((c) => (
                       <button
                         key={c.id}
                         onClick={() => toggleIn("cams", c.id)}
                         className="px-[9px] py-1 rounded-md cursor-pointer text-[11.5px]"
                         style={chipStyle(filters.cams.includes(c.id))}
                       >
-                        {fa ? c.nameFa : c.name}
+                        {c.name}
                       </button>
                     ))}
                   </div>
@@ -241,7 +270,7 @@ export function ReportingPage() {
               </button>
               <button
                 onClick={() => {
-                  setFilters(DEFAULT_REPORT_FILTERS);
+                  setFilters(defaultReportFilters());
                   setPage(1);
                 }}
                 className="px-3.5 py-2 rounded-[9px] text-dim text-[12px] cursor-pointer"
@@ -280,8 +309,8 @@ export function ReportingPage() {
             <div className="flex gap-3 flex-wrap flex-1">
               {legend.map((p) => (
                 <span key={p.id} className="inline-flex items-center gap-1.5 text-[11px] text-dim">
-                  <span className="w-[9px] h-[9px] rounded-[3px]" style={{ background: p.color }} />
-                  {fa ? p.nameFa : p.name}
+                  <span className="w-[9px] h-[9px] rounded-[3px]" style={{ background: colorForId(p.id, p.is_unknown) }} />
+                  {personLabel(p)}
                 </span>
               ))}
             </div>
@@ -308,33 +337,31 @@ export function ReportingPage() {
               )}
             </div>
           </div>
-          {timeline.empty && (
+          {isLoading && <div className="py-[26px] px-3 text-center text-[12px] text-dim">{dict.loading}</div>}
+          {!isLoading && timeline.empty && (
             <div className="py-[26px] px-3 rounded-lg text-center text-[12px] text-dim" style={{ border: "1px dashed var(--fv-line)" }}>
               {dict.no_chart}
             </div>
           )}
           <div style={{ display: timeline.empty ? "none" : "flex", flexDirection: "column", gap: 4, overflowX: "auto" }}>
             <div style={{ minWidth: `${ZOOM[zoomIdx]}%` }}>
-              {timeline.lanes.map((ln) => {
-                const cam = cameraById(ln.cameraId);
-                return (
-                  <div key={ln.cameraId} className="grid gap-2.5 items-center" style={{ gridTemplateColumns: "126px minmax(0,1fr)" }}>
-                    <span className="text-[11.5px] text-dim overflow-hidden text-ellipsis whitespace-nowrap sticky bg-panel" style={{ insetInlineStart: 0, paddingInlineEnd: 8 }}>
-                      {fa ? cam.nameFa : cam.name}
-                    </span>
-                    <div className="relative h-7 rounded-md bg-panel2 overflow-hidden">
-                      {ln.segments.map((sg, i) => (
-                        <div
-                          key={i}
-                          title={sg.title}
-                          className="absolute rounded"
-                          style={{ top: 5, bottom: 5, insetInlineStart: `${sg.left}%`, width: `${sg.width}%`, background: sg.color, opacity: sg.dimmed ? 0.55 : 1 }}
-                        />
-                      ))}
-                    </div>
+              {timeline.lanes.map((ln) => (
+                <div key={ln.cameraId} className="grid gap-2.5 items-center" style={{ gridTemplateColumns: "126px minmax(0,1fr)" }}>
+                  <span className="text-[11.5px] text-dim overflow-hidden text-ellipsis whitespace-nowrap sticky bg-panel" style={{ insetInlineStart: 0, paddingInlineEnd: 8 }}>
+                    {ln.cameraName}
+                  </span>
+                  <div className="relative h-7 rounded-md bg-panel2 overflow-hidden">
+                    {ln.segments.map((sg, i) => (
+                      <div
+                        key={i}
+                        title={sg.title}
+                        className="absolute rounded"
+                        style={{ top: 5, bottom: 5, insetInlineStart: `${sg.left}%`, width: `${sg.width}%`, background: sg.color, opacity: sg.dimmed ? 0.55 : 1 }}
+                      />
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              ))}
               <div className="grid gap-2.5 mt-1.5" style={{ gridTemplateColumns: "126px minmax(0,1fr)" }}>
                 <span />
                 <div className="flex justify-between text-[10px] font-mono text-faint">
@@ -354,7 +381,6 @@ export function ReportingPage() {
             <span className="text-[14px] font-semibold text-txt">{dict.results}</span>
             <span className="text-[11.5px] font-mono text-teal">{fa ? `${num(summary.totalEvents)} رویداد` : `${num(summary.totalEvents)} detection events`}</span>
           </div>
-          <span className="text-[11px] text-faint">{dict.results_note}</span>
         </div>
         <div
           className="grid gap-3 px-4 py-[11px] bg-panel2 border-b border-line text-[10px] font-mono uppercase text-faint"
@@ -366,33 +392,29 @@ export function ReportingPage() {
           <span>{dict.th_last}</span>
           <span style={{ textAlign: "end" }}>{dict.th_count}</span>
         </div>
-        {shown.map((r, i) => {
-          const p = personById(r.personId);
-          const cam = cameraById(r.cameraId);
-          return (
-            <div
-              key={`${r.date}-${r.personId}-${r.cameraId}-${i}`}
-              className="grid gap-3 items-center px-4 py-[11px] border-b border-line text-[12.5px]"
-              style={{ gridTemplateColumns: "1.4fr 1.4fr 1fr 1fr .8fr", background: i % 2 ? "var(--fv-zebra)" : "transparent" }}
-            >
-              <span className="flex items-center gap-2.5 min-w-0">
-                <span className="w-[9px] h-[9px] rounded-[3px] flex-none" style={{ background: p.color }} />
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap" style={{ color: r.personId === "p0" ? "var(--fv-dim)" : "var(--fv-txt)" }}>
-                  {fa ? p.nameFa : p.name}
-                </span>
+        {shown.map((r, i) => (
+          <div
+            key={r.id}
+            className="grid gap-3 items-center px-4 py-[11px] border-b border-line text-[12.5px]"
+            style={{ gridTemplateColumns: "1.4fr 1.4fr 1fr 1fr .8fr", background: i % 2 ? "var(--fv-zebra)" : "transparent" }}
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <span className="w-[9px] h-[9px] rounded-[3px] flex-none" style={{ background: colorForId(r.personId, r.isUnknown) }} />
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap" style={{ color: r.isUnknown ? "var(--fv-dim)" : "var(--fv-txt)" }}>
+                {r.isUnknown ? dict.unknown_tag : r.personName}
               </span>
-              <span className="text-dim overflow-hidden text-ellipsis whitespace-nowrap">{fa ? cam.nameFa : cam.name}</span>
-              <span className="font-mono text-dim">
-                {shortDate(r.date)} {fd(r.first.slice(0, 5))}
-              </span>
-              <span className="font-mono text-dim">{fd(r.last)}</span>
-              <span className="font-mono text-txt" style={{ textAlign: "end" }}>
-                {num(r.count)}
-              </span>
-            </div>
-          );
-        })}
-        {summary.matched.length === 0 && (
+            </span>
+            <span className="text-dim overflow-hidden text-ellipsis whitespace-nowrap">{r.cameraName}</span>
+            <span className="font-mono text-dim">
+              {shortDate(r.date)} {fd(r.first.slice(0, 5))}
+            </span>
+            <span className="font-mono text-dim">{fd(r.last.slice(0, 5))}</span>
+            <span className="font-mono text-txt" style={{ textAlign: "end" }}>
+              {num(r.count)}
+            </span>
+          </div>
+        ))}
+        {summary.matched.length === 0 && !isLoading && (
           <div className="py-[34px] px-4 flex flex-col items-center gap-2.5 text-center">
             <span className="text-[13px] text-txt font-medium">{dict.no_results}</span>
             <span className="text-[12px] text-dim max-w-[340px]" style={{ textWrap: "pretty" }}>
@@ -400,7 +422,7 @@ export function ReportingPage() {
             </span>
             <button
               onClick={() => {
-                setFilters(DEFAULT_REPORT_FILTERS);
+                setFilters(defaultReportFilters());
                 setPage(1);
               }}
               className="mt-0.5 px-3.5 py-[7px] rounded-[9px] text-indigo-soft text-[12px] cursor-pointer"

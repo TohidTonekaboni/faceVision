@@ -1,62 +1,23 @@
-export type CameraStatus = "online" | "degraded" | "offline";
+/** UI-facing shapes consumed by pages/components. Proper nouns (camera
+ * names, person names, usernames, filenames) come straight from the API and
+ * are never translated — only fixed UI copy/enum labels get an i18n lookup,
+ * sourced from `i18n/en.ts` / `i18n/fa.ts` by a stable key, not stored on
+ * the record itself. */
+export type CameraStatus = "online" | "offline";
 
 export interface Camera {
   id: string;
   name: string;
-  nameFa: string;
-  zone: string;
-  zoneFa: string;
+  zone: string | null;
   status: CameraStatus;
-  inferenceOn: boolean;
-  fps: string;
-  host: string;
-  path: string;
   secured: boolean;
 }
 
 export interface Person {
   id: string;
   name: string;
-  nameFa: string;
+  isUnknown: boolean;
   color: string;
-}
-
-export interface DetectionEvent {
-  person: string;
-  personFa: string;
-  unknown: boolean;
-  cameraId: string;
-  seen: string;
-  confidence: string;
-}
-
-export interface ReportRow {
-  date: string;
-  personId: string;
-  cameraId: string;
-  first: string;
-  last: string;
-  count: number;
 }
 
 export type UserRole = "super_admin" | "level_1" | "level_2" | "level_3";
-
-export interface AppUser {
-  name: string;
-  nameFa: string;
-  handle: string;
-  role: UserRole;
-  lastSignIn: string;
-  active: boolean;
-}
-
-export interface DetectionBox {
-  label: string;
-  labelFa: string;
-  confidence: string;
-  color: string;
-  left: string;
-  top: string;
-  width: string;
-  height: string;
-}

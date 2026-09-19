@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import PowerSettingsNewRoundedIcon from "@mui/icons-material/PowerSettingsNewRounded";
 import { useAppStore } from "../../store/appStore";
+import { useAuthStore } from "../../store/authStore";
 import { t, formatDigits } from "../../i18n";
 import { buildNavGroups } from "./navConfig";
 import { ImageSlot } from "../common/ImageSlot";
@@ -12,8 +13,10 @@ export function Sidebar() {
   const role = useAppStore((s) => s.role);
   const lastCameraId = useAppStore((s) => s.lastCameraId);
   const logout = useAppStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
   const dict = t(lang);
   const groups = buildNavGroups(dict, lang, role, lastCameraId);
+  const roleLabel = (dict as Record<string, string>)[`role_${role}`] ?? role;
 
   return (
     <aside className="w-[248px] flex-none flex flex-col bg-panel border-e border-line">
@@ -90,8 +93,10 @@ export function Sidebar() {
           <ImageSlot id="fv-avatar" shape="rounded" radius={9} placeholder="avatar" />
         </div>
         <div className="flex-1 min-w-0 flex flex-col">
-          <span className="text-[12px] font-medium text-txt overflow-hidden text-ellipsis whitespace-nowrap">{dict.user_name}</span>
-          <span className="text-[10px] font-mono text-teal">{role}</span>
+          <span className="text-[12px] font-medium text-txt overflow-hidden text-ellipsis whitespace-nowrap">
+            {user?.full_name || user?.username || dict.user_name}
+          </span>
+          <span className="text-[10px] font-mono text-teal">{roleLabel}</span>
         </div>
         <button
           title={dict.signout}

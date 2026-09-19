@@ -1,7 +1,4 @@
-import { CAMERAS, cameraById } from "./cameras";
-import { PEOPLE, personById } from "./people";
-import { REPORT_DATA, REPORT_DAYS } from "./detections";
-import type { ReportRow } from "./types";
+import { colorForId } from "../utils/palette";
 
 export interface ReportFilters {
   from: string;
@@ -11,26 +8,34 @@ export interface ReportFilters {
   unknown: boolean;
 }
 
-export const DEFAULT_REPORT_FILTERS: ReportFilters = {
-  from: REPORT_DAYS[0],
-  to: REPORT_DAYS[REPORT_DAYS.length - 1],
-  people: [],
-  cams: [],
-  unknown: true,
-};
-
-function inRange(date: string, f: ReportFilters) {
-  return date >= f.from && date <= f.to;
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
-export function filterReportRows(f: ReportFilters): ReportRow[] {
-  return REPORT_DATA.filter(
-    (r) =>
-      inRange(r.date, f) &&
-      (f.people.length === 0 || f.people.includes(r.personId)) &&
-      (f.cams.length === 0 || f.cams.includes(r.cameraId)) &&
-      (f.unknown || r.personId !== "p0"),
-  );
+/** Defaults to the last 7 calendar days ending today, replacing the mock's
+ * hardcoded static date range. */
+export function defaultReportFilters(): ReportFilters {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - 6);
+  return { from: isoDate(from), to: isoDate(to), people: [], cams: [], unknown: true };
+}
+
+/** One row per detection "session" (a person seen continuously on one camera
+ * for a stretch of time) — this is exactly what `DetectionEventOut` already
+ * represents, so a row maps 1:1 to one API event rather than a client-side
+ * aggregate the way the old mock's ReportRow was. */
+export interface ReportRow {
+  id: string;
+  date: string;
+  personId: string;
+  personName: string;
+  isUnknown: boolean;
+  cameraId: string;
+  cameraName: string;
+  first: string;
+  last: string;
+  count: number;
 }
 
 export function distinctIds<K extends "personId" | "cameraId">(rows: ReportRow[], key: K): string[] {
@@ -49,13 +54,15 @@ export interface ReportSummary {
   camsUsed: string[];
 }
 
-export function summarize(f: ReportFilters): ReportSummary {
-  const matched = filterReportRows(f);
+/** The backend already applies date/person/camera/unknown filtering via
+ * query params, so this just aggregates the (already-matching) rows it's
+ * given — no client-side re-filtering. */
+export function summarize(rows: ReportRow[]): ReportSummary {
   return {
-    matched,
-    totalEvents: matched.reduce((a, r) => a + r.count, 0),
-    distinctPeople: distinctIds(matched, "personId"),
-    camsUsed: distinctIds(matched, "cameraId"),
+    matched: rows,
+    totalEvents: rows.reduce((a, r) => a + r.count, 0),
+    distinctPeople: distinctIds(rows, "personId"),
+    camsUsed: distinctIds(rows, "cameraId"),
   };
 }
 
@@ -81,6 +88,7 @@ export interface TimelineSegment {
 
 export interface TimelineLane {
   cameraId: string;
+  cameraName: string;
   segments: TimelineSegment[];
 }
 
@@ -90,27 +98,40 @@ export interface Timeline {
   empty: boolean;
 }
 
-export function computeTimeline(summary: ReportSummary, f: ReportFilters, fd: (v: string | number) => string): Timeline {
+/** `fallbackLanes` (id + display name) fill the chart with empty lanes when
+ * no rows/camera filter narrow down which cameras to show — mirrors the
+ * mock's behaviour of always drawing a handful of lanes. */
+export function computeTimeline(
+  summary: ReportSummary,
+  fallbackDay: string,
+  fallbackLanes: { id: string; name: string }[],
+  fd: (v: string | number) => string,
+): Timeline {
   const { matched, camsUsed } = summary;
-  const day = matched.length ? matched.map((r) => r.date).sort().reverse()[0] : f.to;
+  const day = matched.length ? matched.map((r) => r.date).sort().reverse()[0] : fallbackDay;
   const dayRows = matched.filter((r) => r.date === day);
-  const laneCams = (camsUsed.length ? camsUsed : f.cams.length ? f.cams : CAMERAS.slice(0, 6).map((c) => c.id)).slice(0, 7);
+
+  const camNameById = new Map<string, string>();
+  for (const r of dayRows) camNameById.set(r.cameraId, r.cameraName);
+  for (const c of fallbackLanes) if (!camNameById.has(c.id)) camNameById.set(c.id, c.name);
+
+  const laneCams = (camsUsed.length ? camsUsed : fallbackLanes.map((c) => c.id)).slice(0, 7);
 
   const lanes: TimelineLane[] = laneCams.map((cid, li) => {
     const rows = dayRows.filter((r) => r.cameraId === cid);
     const lefts = spread(li + 3, Math.min(5, Math.max(rows.length, 0)));
     return {
       cameraId: cid,
+      cameraName: camNameById.get(cid) ?? cid,
       segments: rows.slice(0, 5).map((r, i) => {
-        const p = personById(r.personId);
         const width = 6 + (r.count % 9);
         return {
           personId: r.personId,
-          title: `${p.name} · ${fd(r.first.slice(0, 5))} – ${fd(r.last.slice(0, 5))}`,
+          title: `${r.personName} · ${fd(r.first.slice(0, 5))} – ${fd(r.last.slice(0, 5))}`,
           left: lefts[i] ?? 6,
           width,
-          color: p.color,
-          dimmed: r.personId === "p0",
+          color: colorForId(r.personId, r.isUnknown),
+          dimmed: r.isUnknown,
         };
       }),
     };
@@ -118,5 +139,3 @@ export function computeTimeline(summary: ReportSummary, f: ReportFilters, fd: (v
 
   return { day, lanes, empty: dayRows.length === 0 };
 }
-
-export { CAMERAS, PEOPLE, cameraById, personById, REPORT_DAYS };

@@ -1,7 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import { delay } from "../data/mockApi";
-import { USERS } from "../data/users";
+export { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from "../api/queries";
+export type { UserRecord } from "../api/queries";
 
-export function useUsers() {
-  return useQuery({ queryKey: ["users"], queryFn: () => delay(USERS) });
-}
+export const ROLE_COLORS: Record<string, string> = {
+  super_admin: "#6366F1",
+  level_1: "#14B8A6",
+  level_2: "#0EA5E9",
+  level_3: "#7C89A0",
+};

@@ -5,7 +5,6 @@ import { t, formatDigits } from "../i18n";
 import { Panel } from "../components/common/Panel";
 import { ImageSlot } from "../components/common/ImageSlot";
 import { StatusChip, StatusDot } from "../components/common/StatusChip";
-import { cameraById } from "../data/cameras";
 import {
   useActiveCameraStrip,
   useDashboardStats,
@@ -33,7 +32,9 @@ export function DashboardPage() {
   const { data: feed = [] } = useDetectionFeed(feedTab);
   const { data: health = [] } = useSystemHealth();
   const { data: topPeople = [] } = useTopPeople();
-  const eventsToday = 1284;
+
+  const onlineCount = strip.filter((c) => c.status === "online").length;
+  const offlineCount = strip.filter((c) => c.status === "offline").length;
 
   return (
     <div className="flex flex-col gap-[18px] max-w-[1520px]">
@@ -50,31 +51,31 @@ export function DashboardPage() {
             <span className="w-1.5 h-1.5 rounded-full bg-teal" style={{ animation: "fvGlow 2s infinite" }} />
             {dict.live_now}
           </span>
-          <span className="text-[11px] font-mono text-faint">14:32:08</span>
         </div>
       </div>
 
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(186px,1fr))" }}>
         {stats.map((s) => (
-          <Panel key={s.label} className="p-4 flex flex-col gap-[9px]" style={{ padding: "15px 16px" }}>
+          <Panel key={s.key} className="p-4 flex flex-col gap-[9px]" style={{ padding: "15px 16px" }}>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11.5px] text-dim">{fa ? s.labelFa : s.label}</span>
-              <span
-                className="text-[10.5px] font-mono px-1.5 py-[2px] rounded"
-                style={{ background: s.up ? "rgba(20,184,166,.13)" : "rgba(245,158,11,.13)", color: s.up ? "#14B8A6" : "#F59E0B" }}
-              >
-                {formatDigits(lang, s.delta)}
-              </span>
+              <span className="text-[11.5px] text-dim">{dict[`stat_${s.key}` as keyof typeof dict]}</span>
             </div>
             <div className="flex items-baseline gap-[7px]">
               <span className="text-[27px] font-semibold font-mono text-txt" style={{ letterSpacing: "-.02em" }}>
                 {formatDigits(lang, s.value)}
               </span>
-              <span className="text-[11px] text-faint">{fa ? s.unitFa ?? s.unit : s.unit}</span>
+              {s.unitKey === "of_total_cameras" && (
+                <span className="text-[11px] text-faint">/ {formatDigits(lang, stats[0]?.value ?? 0)}</span>
+              )}
+              {s.unitKey === "of_detections_today" && (
+                <span className="text-[11px] text-faint">{fa ? "از شناسایی‌ها" : "of detections"}</span>
+              )}
             </div>
-            <div className="h-[3px] rounded bg-panel2 overflow-hidden">
-              <div className="h-full rounded" style={{ width: `${s.pct}%`, background: s.up ? "#14B8A6" : "#F59E0B" }} />
-            </div>
+            {s.pct !== null && (
+              <div className="h-[3px] rounded bg-panel2 overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${s.pct}%`, background: "#14B8A6" }} />
+              </div>
+            )}
           </Panel>
         ))}
       </div>
@@ -84,7 +85,7 @@ export function DashboardPage() {
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="text-[13px] font-semibold text-txt">{dict.camera_strip}</span>
             <span className="text-[11px] text-faint">
-              {fa ? "۹ دوربین با استنتاج فعال · ۱ ناپایدار · ۱ قطع" : "9 with inference · 1 degraded · 1 offline"}
+              {fa ? `${onlineCount} فعال · ${offlineCount} قطع` : `${onlineCount} online · ${offlineCount} offline`}
             </span>
           </div>
           <button
@@ -107,21 +108,15 @@ export function DashboardPage() {
                 <ImageSlot id={`fv-strip-${c.id}`} shape="rect" placeholder={fa ? "تصویر دوربین" : "camera frame"} />
                 <div className="absolute top-[7px] flex gap-[5px] pointer-events-none" style={{ insetInlineStart: 7 }}>
                   <StatusChip status={c.status} />
-                  {c.inferenceOn && (
-                    <span className="px-1.5 py-[3px] rounded-[5px] text-white font-mono" style={{ background: "rgba(99,102,241,.9)", fontSize: 9, letterSpacing: ".06em" }}>
-                      AI
-                    </span>
-                  )}
                 </div>
               </div>
               <div className="px-2.5 py-2 flex flex-col gap-0.5">
-                <span className="text-[11.5px] font-medium text-txt overflow-hidden text-ellipsis whitespace-nowrap">{fa ? c.nameFa : c.name}</span>
-                <span className="text-[10px] font-mono text-faint">
-                  {fa ? c.zoneFa : c.zone} · {c.fps}
-                </span>
+                <span className="text-[11.5px] font-medium text-txt overflow-hidden text-ellipsis whitespace-nowrap">{c.name}</span>
+                <span className="text-[10px] font-mono text-faint">{c.zone ?? "—"}</span>
               </div>
             </div>
           ))}
+          {strip.length === 0 && <div className="px-2 py-6 text-[12px] text-faint">{dict.no_data}</div>}
         </div>
       </Panel>
 
@@ -149,63 +144,59 @@ export function DashboardPage() {
               ))}
             </div>
           </div>
-          {feed.map((e, i) => {
-            const cam = cameraById(e.cameraId);
-            return (
-              <div
-                key={`${e.cameraId}-${e.seen}`}
-                onClick={() => navigate(`/cameras/${e.cameraId}`)}
-                className="flex items-center gap-[13px] px-4 py-3 border-b border-line cursor-pointer"
-                style={{ background: i % 2 ? "var(--fv-zebra)" : "transparent" }}
-              >
-                <div className="w-[42px] h-[42px] rounded-[10px] overflow-hidden flex-none border border-line bg-panel2">
-                  <ImageSlot id={`fv-feed-${i}`} shape="rounded" radius={10} placeholder="face" />
-                </div>
-                <div className="flex-1 min-w-0 flex flex-col gap-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-medium" style={{ color: e.unknown ? "#F59E0B" : "var(--fv-txt)" }}>
-                      {fa ? e.personFa : e.person}
-                    </span>
-                    {e.unknown && (
-                      <span
-                        className="px-1.5 py-[2px] rounded-[5px] font-mono"
-                        style={{ background: "rgba(245,158,11,.14)", border: "1px solid rgba(245,158,11,.3)", color: "#F59E0B", fontSize: 9.5, letterSpacing: ".06em" }}
-                      >
-                        {dict.unknown_tag}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 text-[11.5px] text-dim flex-wrap">
-                    <span>{fa ? cam.nameFa : cam.name}</span>
-                    <span style={{ opacity: 0.4 }}>·</span>
-                    <span>{fa ? cam.zoneFa : cam.zone}</span>
-                    <span style={{ opacity: 0.4 }}>·</span>
-                    <span className="font-mono">{formatDigits(lang, e.seen)}</span>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1.5 flex-none">
-                  <span className="text-[11px] font-mono text-dim">{formatDigits(lang, e.confidence)}</span>
-                  <div className="w-[62px] h-[3px] rounded bg-panel2 overflow-hidden">
-                    <div className="h-full rounded" style={{ width: `${parseFloat(e.confidence)}%`, background: e.unknown ? "#F59E0B" : "#14B8A6" }} />
-                  </div>
-                </div>
-                <button
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    navigate(`/cameras/${e.cameraId}`);
-                  }}
-                  className="flex-none px-2.5 py-[6px] rounded-lg text-[11px] text-dim cursor-pointer"
-                  style={{ border: "1px solid var(--fv-line)", background: "transparent" }}
-                >
-                  {dict.view}
-                </button>
+          {feed.map((e, i) => (
+            <div
+              key={e.id}
+              onClick={() => e.cameraId && navigate(`/cameras/${e.cameraId}`)}
+              className="flex items-center gap-[13px] px-4 py-3 border-b border-line cursor-pointer"
+              style={{ background: i % 2 ? "var(--fv-zebra)" : "transparent" }}
+            >
+              <div className="w-[42px] h-[42px] rounded-[10px] overflow-hidden flex-none border border-line bg-panel2">
+                <ImageSlot id={`fv-feed-${e.id}`} shape="rounded" radius={10} placeholder="face" />
               </div>
-            );
-          })}
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[13px] font-medium" style={{ color: e.isUnknown ? "#F59E0B" : "var(--fv-txt)" }}>
+                    {e.isUnknown ? dict.unknown_tag : e.personName}
+                  </span>
+                  {e.isUnknown && (
+                    <span
+                      className="px-1.5 py-[2px] rounded-[5px] font-mono"
+                      style={{ background: "rgba(245,158,11,.14)", border: "1px solid rgba(245,158,11,.3)", color: "#F59E0B", fontSize: 9.5, letterSpacing: ".06em" }}
+                    >
+                      {dict.unknown_tag}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-[11.5px] text-dim flex-wrap">
+                  <span>{e.cameraName}</span>
+                  <span style={{ opacity: 0.4 }}>·</span>
+                  <span className="font-mono">{formatDigits(lang, new Date(e.startedAt).toLocaleTimeString())}</span>
+                </div>
+              </div>
+              {e.maxConfidence !== null && (
+                <div className="flex flex-col items-end gap-1.5 flex-none">
+                  <span className="text-[11px] font-mono text-dim">{formatDigits(lang, `${(e.maxConfidence * 100).toFixed(1)}%`)}</span>
+                  <div className="w-[62px] h-[3px] rounded bg-panel2 overflow-hidden">
+                    <div className="h-full rounded" style={{ width: `${e.maxConfidence * 100}%`, background: e.isUnknown ? "#F59E0B" : "#14B8A6" }} />
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  if (e.cameraId) navigate(`/cameras/${e.cameraId}`);
+                }}
+                className="flex-none px-2.5 py-[6px] rounded-lg text-[11px] text-dim cursor-pointer"
+                style={{ border: "1px solid var(--fv-line)", background: "transparent" }}
+              >
+                {dict.view}
+              </button>
+            </div>
+          ))}
+          {feed.length === 0 && <div className="px-4 py-8 text-center text-[12px] text-faint">{dict.no_data}</div>}
           <div className="px-4 py-[11px] flex items-center justify-between gap-3 border-t border-line">
-            <span className="text-[11px] font-mono text-faint">
-              {fa ? `به‌روزرسانی هر ۳ ثانیه · ${formatDigits(lang, eventsToday)} رویداد امروز` : `polling every 3s · ${eventsToday.toLocaleString("en-US")} events today`}
-            </span>
+            <span className="text-[11px] font-mono text-faint">{fa ? "به‌روزرسانی هر ۱۵ ثانیه" : "refreshes every 15s"}</span>
             <button
               onClick={() => navigate("/reporting")}
               className="px-[11px] py-[6px] rounded-lg border-none text-indigo-soft text-[11.5px] cursor-pointer bg-panel2"
@@ -220,10 +211,12 @@ export function DashboardPage() {
             <div className="px-[15px] py-[13px] border-b border-line text-[13px] font-semibold text-txt">{dict.sys_status}</div>
             <div className="px-[15px] pt-1.5 pb-3">
               {health.map((h) => (
-                <div key={h.label} className="flex items-center gap-2.5 py-[9px] border-b border-line">
+                <div key={h.key} className="flex items-center gap-2.5 py-[9px] border-b border-line">
                   <StatusDot status={h.status} />
-                  <span className="flex-1 text-[12px] text-dim">{fa ? h.labelFa : h.label}</span>
-                  <span className="text-[11.5px] font-mono text-txt">{formatDigits(lang, fa ? h.valueFa ?? h.value : h.value)}</span>
+                  <span className="flex-1 text-[12px] text-dim">{dict[`health_${h.key}` as keyof typeof dict]}</span>
+                  <span className="text-[11.5px] font-mono text-txt">
+                    {h.detail ?? dict[`health_status_${h.status}` as keyof typeof dict]}
+                  </span>
                 </div>
               ))}
             </div>
@@ -240,12 +233,6 @@ export function DashboardPage() {
               </div>
               <div className="text-[11.5px] leading-[1.6] text-dim mb-3">{dict.inference_card_sub}</div>
               <div className="flex gap-2">
-                <button
-                  className="flex-1 py-[9px] rounded-[9px] text-rose text-[12px] font-medium cursor-pointer"
-                  style={{ border: "1px solid rgba(244,63,94,.35)", background: "rgba(244,63,94,.1)" }}
-                >
-                  {dict.stop_all}
-                </button>
                 <button
                   onClick={() => navigate("/cameras")}
                   className="flex-1 py-[9px] rounded-[9px] text-dim text-[12px] cursor-pointer"
@@ -264,19 +251,20 @@ export function DashboardPage() {
             </div>
             <div className="px-[15px] pt-3 pb-[15px] flex flex-col gap-3">
               {topPeople.map((p) => (
-                <div key={p.slot} className="flex items-center gap-2.5">
+                <div key={p.personId} className="flex items-center gap-2.5">
                   <div className="w-[26px] h-[26px] rounded-full overflow-hidden flex-none border border-line">
-                    <ImageSlot id={p.slot} shape="circle" placeholder="face" />
+                    <ImageSlot id={`fv-top-${p.personId}`} shape="circle" placeholder="face" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] text-txt overflow-hidden text-ellipsis whitespace-nowrap">{fa ? p.nameFa : p.name}</div>
+                    <div className="text-[12px] text-txt overflow-hidden text-ellipsis whitespace-nowrap">{p.name}</div>
                     <div className="h-[3px] mt-[5px] rounded bg-panel2 overflow-hidden">
-                      <div className="h-full rounded" style={{ width: `${p.pct}%`, background: "#6366F1" }} />
+                      <div className="h-full rounded" style={{ width: `${p.pct}%`, background: p.color }} />
                     </div>
                   </div>
                   <span className="text-[11px] font-mono text-dim">{formatDigits(lang, p.count)}</span>
                 </div>
               ))}
+              {topPeople.length === 0 && <div className="text-[11.5px] text-faint">{dict.no_data}</div>}
             </div>
           </Panel>
         </div>
