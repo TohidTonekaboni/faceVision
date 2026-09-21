@@ -16,6 +16,7 @@ import { useSnapshotSessionStore } from "../store/snapshotSessionStore";
 import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
 import { useLocale } from "../i18n/LocaleContext";
 import { LanguageToggle } from "./LanguageToggle";
+import logo from "../assets/logo1.jpeg";
 
 const navItemClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -69,13 +70,10 @@ export function Layout() {
     <div className="flex h-screen bg-canvas text-ink font-display">
       <aside className={`w-64 shrink-0 bg-surface flex flex-col ${direction === "rtl" ? "border-l" : "border-r"} border-border`}>
         <div className="px-5 py-5 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <VideocamRoundedIcon sx={{ fontSize: 18, color: "#fff" }} />
-            </div>
-            <span className="font-bold tracking-tight text-lg">FaceVision</span>
+          <div className="flex flex-col items-center">
+            <img src={logo} alt="Logo" className="w-16 h-16 rounded-lg object-cover" />
+            <p className="text-xs text-inkDim mt-2">{t("liveRecognition")}</p>
           </div>
-          <p className="text-xs text-inkDim mt-1.5">{t("liveRecognition")}</p>
           <LanguageToggle className="mt-4" />
         </div>
 

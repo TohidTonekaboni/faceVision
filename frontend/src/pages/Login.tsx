@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, TextField, Alert } from "@mui/material";
-import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
 import { apiClient } from "../api/client";
 import { useAuthStore } from "../store/authStore";
 import { useLocale } from "../i18n/LocaleContext";
 import { LanguageToggle } from "../components/LanguageToggle";
+import logo from "../assets/logo1.jpeg";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -43,10 +43,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <div className="flex justify-end mb-4"><LanguageToggle /></div>
         <div className="flex flex-col items-center mb-6">
-          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center mb-3 shadow-soft">
-            <VideocamRoundedIcon sx={{ color: "#fff" }} />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">FaceVision</h1>
+          <img src={logo} alt="Logo" className="w-28 h-28 rounded-xl object-cover mb-3 shadow-soft" />
           <p className="text-sm text-inkDim mt-1">{t("signInDescription")}</p>
         </div>
 
