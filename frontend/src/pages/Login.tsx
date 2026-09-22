@@ -5,7 +5,7 @@ import { apiClient } from "../api/client";
 import { useAuthStore } from "../store/authStore";
 import { useLocale } from "../i18n/LocaleContext";
 import { LanguageToggle } from "../components/LanguageToggle";
-import logo from "../assets/logo1.jpeg";
+import logo from "../assets/logo_final.jpeg";
 
 export default function Login() {
   const [username, setUsername] = useState("");

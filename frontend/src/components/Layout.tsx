@@ -16,7 +16,7 @@ import { useSnapshotSessionStore } from "../store/snapshotSessionStore";
 import { useLiveInferenceSessionStore } from "../store/liveInferenceSessionStore";
 import { useLocale } from "../i18n/LocaleContext";
 import { LanguageToggle } from "./LanguageToggle";
-import logo from "../assets/logo1.jpeg";
+import logo from "../assets/logo_final.jpeg";
 
 const navItemClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
